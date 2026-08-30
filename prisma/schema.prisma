@@ -1,0 +1,65 @@
+// OpenBlueprint database schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Project {
+  id           String          @id @default(cuid())
+  name         String
+  buildingType String          @default("residential")
+  // Snapshot of the current layout (JSON stringified LayoutData)
+  layoutData   String?
+  // Snapshot of project config (plot, rooms, prefs) JSON
+  configData   String?
+  accentColor  String?
+  thumbnail    String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  versions     DesignVersion[]
+  aiChats      AiConversation[]
+  costEstimates CostEstimate[]
+}
+
+model DesignVersion {
+  id         String   @id @default(cuid())
+  projectId  String
+  name       String
+  layoutData String
+  note       String?
+  createdAt  DateTime @default(now())
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model AiConversation {
+  id         String   @id @default(cuid())
+  projectId  String
+  role       String   // user | assistant
+  content    String
+  meta       String?  // JSON for structured actions
+  createdAt  DateTime @default(now())
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model CostEstimate {
+  id         String   @id @default(cuid())
+  projectId  String
+  totalCost  Float
+  area       Float
+  grade      String
+  breakdown  String   // JSON
+  createdAt  DateTime @default(now())
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}

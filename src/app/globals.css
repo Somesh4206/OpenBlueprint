@@ -1,0 +1,202 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-display: var(--font-display);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-navy: var(--navy);
+  --color-charcoal: var(--charcoal);
+  --color-cyan: var(--cyan);
+  --color-amber-soft: var(--amber-soft);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.5rem;
+  /* Warm white background, charcoal text, navy blueprint lines */
+  --background: oklch(0.985 0.004 95);
+  --foreground: oklch(0.22 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.02 260);
+  /* Blueprint navy primary */
+  --primary: oklch(0.32 0.08 250);
+  --primary-foreground: oklch(0.985 0.004 95);
+  --secondary: oklch(0.96 0.006 250);
+  --secondary-foreground: oklch(0.32 0.08 250);
+  --muted: oklch(0.965 0.005 250);
+  --muted-foreground: oklch(0.5 0.015 260);
+  --accent: oklch(0.93 0.04 230);
+  --accent-foreground: oklch(0.32 0.08 250);
+  --destructive: oklch(0.58 0.22 25);
+  --border: oklch(0.9 0.008 250);
+  --input: oklch(0.9 0.008 250);
+  --ring: oklch(0.55 0.18 230);
+  --chart-1: oklch(0.32 0.08 250);
+  --chart-2: oklch(0.55 0.16 200);
+  --chart-3: oklch(0.6 0.18 160);
+  --chart-4: oklch(0.7 0.16 70);
+  --chart-5: oklch(0.55 0.2 25);
+  --sidebar: oklch(0.985 0.004 95);
+  --sidebar-foreground: oklch(0.22 0.02 260);
+  --sidebar-primary: oklch(0.32 0.08 250);
+  --sidebar-primary-foreground: oklch(0.985 0.004 95);
+  --sidebar-accent: oklch(0.93 0.04 230);
+  --sidebar-accent-foreground: oklch(0.32 0.08 250);
+  --sidebar-border: oklch(0.9 0.008 250);
+  --sidebar-ring: oklch(0.55 0.18 230);
+  /* OpenBlueprint custom */
+  --navy: oklch(0.32 0.08 250);
+  --charcoal: oklch(0.22 0.02 260);
+  --cyan: oklch(0.62 0.19 220);
+  --amber-soft: oklch(0.8 0.13 75);
+}
+
+.dark {
+  --background: oklch(0.16 0.02 260);
+  --foreground: oklch(0.96 0.005 250);
+  --card: oklch(0.21 0.025 260);
+  --card-foreground: oklch(0.96 0.005 250);
+  --popover: oklch(0.21 0.025 260);
+  --popover-foreground: oklch(0.96 0.005 250);
+  --primary: oklch(0.7 0.16 220);
+  --primary-foreground: oklch(0.16 0.02 260);
+  --secondary: oklch(0.27 0.025 260);
+  --secondary-foreground: oklch(0.96 0.005 250);
+  --muted: oklch(0.27 0.025 260);
+  --muted-foreground: oklch(0.7 0.015 260);
+  --accent: oklch(0.3 0.04 240);
+  --accent-foreground: oklch(0.96 0.005 250);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.62 0.19 220);
+  --chart-1: oklch(0.7 0.16 220);
+  --chart-2: oklch(0.6 0.17 162);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.21 0.025 260);
+  --sidebar-foreground: oklch(0.96 0.005 250);
+  --sidebar-primary: oklch(0.7 0.16 220);
+  --sidebar-primary-foreground: oklch(0.16 0.02 260);
+  --sidebar-accent: oklch(0.3 0.04 240);
+  --sidebar-accent-foreground: oklch(0.96 0.005 250);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.62 0.19 220);
+  --navy: oklch(0.7 0.16 220);
+  --charcoal: oklch(0.96 0.005 250);
+  --cyan: oklch(0.7 0.19 220);
+  --amber-soft: oklch(0.82 0.13 75);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv01", "tnum";
+  }
+}
+
+/* Blueprint technical grid background */
+.bp-grid {
+  background-color: var(--card);
+  background-image:
+    linear-gradient(to right, color-mix(in oklch, var(--navy) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--navy) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(to right, color-mix(in oklch, var(--navy) 12%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--navy) 12%, transparent) 1px, transparent 1px);
+  background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+}
+.bp-grid-dark {
+  background-color: oklch(0.13 0.03 255);
+  background-image:
+    linear-gradient(to right, color-mix(in oklch, var(--cyan) 14%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--cyan) 14%, transparent) 1px, transparent 1px),
+    linear-gradient(to right, color-mix(in oklch, var(--cyan) 22%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--cyan) 22%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px, 120px 120px, 120px 120px;
+}
+
+/* Technical numeric font */
+.tech-num {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-feature-settings: "tnum", "zero";
+  letter-spacing: -0.01em;
+}
+
+/* Animated blueprint line draw */
+@keyframes bp-draw {
+  to { stroke-dashoffset: 0; }
+}
+.bp-draw {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  animation: bp-draw 1.6s ease-out forwards;
+}
+
+@keyframes bp-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.bp-fade-up { animation: bp-fade-up 0.5s ease-out forwards; }
+
+@keyframes bp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.bp-pulse { animation: bp-pulse 1.4s ease-in-out infinite; }
+
+/* Custom scrollbar */
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: color-mix(in oklch, var(--navy) 25%, transparent); border-radius: 4px; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: color-mix(in oklch, var(--navy) 40%, transparent); }
+
+/* Room resize handle */
+.resize-handle {
+  fill: var(--cyan);
+  stroke: white;
+  stroke-width: 1.5;
+  cursor: nwse-resize;
+}
