@@ -54,6 +54,7 @@ import {
   Grid,
   Environment,
   Sky,
+  Edges,
 } from '@react-three/drei';
 import * as THREE from 'three';
 import { FurnitureMesh3D } from './furniture-3d';
@@ -133,36 +134,36 @@ interface StyleConfig {
 const STYLE_CONFIG: Record<DesignStyle, StyleConfig> = {
   modern: {
     wallHeight: 9,
-    wallColor: '#f5f3ee',
-    wallRoughness: 0.75,
+    wallColor: '#e8e4de',
+    wallRoughness: 0.85,
     roofType: 'flat',
     roofOverhang: 0,
     roofOpacity: 0.4,
     windowScale: 1.0,
     accentTrim: false,
     trimColor: '#2b4a7a',
-    slabColor: '#cfd5da',
+    slabColor: '#d8d2c8',
     stairColor: '#a8aeb4',
     pitchedRoofColor: '#7d4f2a',
   },
   minimal: {
     wallHeight: 8.5,
-    wallColor: '#fafafa',
-    wallRoughness: 0.8,
+    wallColor: '#ece8e2',
+    wallRoughness: 0.9,
     roofType: 'flat',
     roofOverhang: 0,
     roofOpacity: 0.4,
     windowScale: 0.95,
     accentTrim: false,
     trimColor: '#525252',
-    slabColor: '#c8cace',
+    slabColor: '#d4cec4',
     stairColor: '#9ca0a4',
     pitchedRoofColor: '#7d4f2a',
   },
   traditional: {
     wallHeight: 9.5,
-    wallColor: '#ede4d3',
-    wallRoughness: 0.78,
+    wallColor: '#e4dac8',
+    wallRoughness: 0.85,
     roofType: 'pitched',
     roofOverhang: 1.5,
     roofOpacity: 0.85,
@@ -175,8 +176,8 @@ const STYLE_CONFIG: Record<DesignStyle, StyleConfig> = {
   },
   contemporary: {
     wallHeight: 10,
-    wallColor: '#f0ece4',
-    wallRoughness: 0.7,
+    wallColor: '#eae6de',
+    wallRoughness: 0.8,
     roofType: 'overhang',
     roofOverhang: 3,
     roofOpacity: 0.4,
@@ -189,8 +190,8 @@ const STYLE_CONFIG: Record<DesignStyle, StyleConfig> = {
   },
   luxury: {
     wallHeight: 10.5,
-    wallColor: '#f8f4ea',
-    wallRoughness: 0.6,
+    wallColor: '#f2ede2',
+    wallRoughness: 0.7,
     roofType: 'flat',
     roofOverhang: 2,
     roofOpacity: 0.4,
@@ -899,6 +900,7 @@ function DoorLeaf({ data }: { data: DoorLeafData }): React.JSX.Element {
           roughness={0.6}
           metalness={0}
         />
+        <Edges scale={1} threshold={15} color="#2a2a2a" />
       </mesh>
     </group>
   );
@@ -1082,34 +1084,31 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
 
   return (
     <>
-      {/* Soft sky-blue background as a fallback / atmospheric base.
-          The <Sky> component paints a real atmospheric gradient on top. */}
-      <color attach="background" args={['#eaf2fa']} />
-      <fog attach="fog" args={['#eaf2fa', 90, 320]} />
+      {/* Warm soft background — overcast/cream feel matching the reference clay render */}
+      <color attach="background" args={['#f0ece4']} />
+      <fog attach="fog" args={['#f0ece4', 100, 350]} />
 
-      {/* Real atmospheric sky — soft gradient + sun glow. Wrapped in Suspense
-          so the rest of the scene can paint immediately. */}
+      {/* Soft atmospheric sky — muted, overcast feel */}
       <Suspense fallback={null}>
         <Sky
           distance={450000}
-          sunPosition={[25, 35, 18]}
-          inclination={0.5}
+          sunPosition={[20, 30, 15]}
+          inclination={0.45}
           azimuth={0.25}
-          turbidity={6}
-          rayleigh={1.2}
-          mieCoefficient={0.005}
-          mieDirectionalG={0.8}
+          turbidity={10}
+          rayleigh={0.6}
+          mieCoefficient={0.008}
+          mieDirectionalG={0.7}
         />
       </Suspense>
 
-      {/* Lighting rig — BRIGHT and CLEAN.
-          Ambient kills dullness; hemisphere adds sky/ground bounce;
-          key directional sun casts crisp shadows; fill softens the dark side. */}
-      <ambientLight intensity={0.8} />
-      <hemisphereLight args={['#ffffff', '#d8dde6', 0.7]} />
+      {/* Lighting — soft, even, high-key ambient (overcast feel from the reference).
+          Minimal harsh shadows; relies on ContactShadows for AO grounding. */}
+      <ambientLight intensity={1.0} />
+      <hemisphereLight args={['#fff8f0', '#e8e4dc', 0.9]} />
       <directionalLight
         position={[25, 35, 18]}
-        intensity={1.5}
+        intensity={0.8}
         castShadow
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-50}
@@ -1135,7 +1134,7 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
       {/* Ground plane — clean light concrete, 300×300. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[300, 300]} />
-        <meshStandardMaterial color="#d4d8de" roughness={0.95} metalness={0} />
+        <meshStandardMaterial color="#e4dfd5" roughness={0.95} metalness={0} />
       </mesh>
 
       {/* Subtle infinite grid — clean technical reference. */}
@@ -1201,9 +1200,10 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
               />
               <meshStandardMaterial
                 color={s.color}
-                roughness={0.3}
-                metalness={0.1}
+                roughness={0.5}
+                metalness={0.05}
               />
+              <Edges scale={1} threshold={15} color="#3a3a3a" />
             </mesh>
           </group>
         ))}
@@ -1220,7 +1220,7 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
           </mesh>
         ))}
 
-        {/* Walls — clean white-with-warmth, semi-transparent in cutaway. */}
+        {/* Walls — warm beige clay, semi-transparent in cutaway, with black edge outlines. */}
         {scene.walls.map((w, i) => (
           <mesh
             key={`w-${i}`}
@@ -1237,6 +1237,9 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
               opacity={wallOpacity}
               depthWrite={!wallTransparent}
             />
+            {/* Black edge outlines — the key "clay render" look from the reference.
+                Render even on transparent walls (cutaway) for consistent style. */}
+            <Edges scale={1} threshold={15} color="#2a2a2a" />
           </mesh>
         ))}
 
@@ -1253,18 +1256,24 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
         ))}
 
         {/* Windows — glossy translucent cyan glass */}
+        {/* Windows — frosted white glass with black frames (reference style) */}
         {scene.windows.map((w, i) => (
-          <mesh key={`win-${i}`} position={w.position}>
-            <boxGeometry args={w.size} />
-            <meshStandardMaterial
-              color="#a8d8f5"
-              transparent
-              opacity={0.35}
-              roughness={0.05}
-              metalness={0.2}
-              depthWrite={false}
-            />
-          </mesh>
+          <group key={`win-${i}`} position={w.position}>
+            {/* Frosted white glass */}
+            <mesh>
+              <boxGeometry args={w.size} />
+              <meshStandardMaterial
+                color="#f5f5f0"
+                transparent
+                opacity={0.85}
+                roughness={0.3}
+                metalness={0}
+                depthWrite={false}
+              />
+            </mesh>
+            {/* Black frame outline */}
+            <Edges scale={1} threshold={1} color="#1a1a1a" lineWidth={2} />
+          </group>
         ))}
 
         {/* Doors — hinged leaves, slightly ajar */}

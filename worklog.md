@@ -303,3 +303,37 @@ Stage Summary:
 - Car + bike auto-added to parking (fixed #5 complaint)
 - PDF export fixed (fixed #6 complaint)
 - 3D viewer brighter with more vivid colors (improved #7 complaint)
+
+---
+Task ID: 7 (minimal furniture + editability fix + human-in-the-loop + 3D clay rebuild)
+Agent: main
+Task: Fix AI furniture editability, reduce auto-furniture to essentials, add human-in-the-loop floor dialog, rebuild 3D as clay/outline render
+
+Work Log:
+- Reduced AI auto-furniture to MINIMAL essentials only: bed in bedroom, sofa in living, kitchen counter in kitchen, dining table in dining, toilet in bathroom, desk in office, altar in pooja, car+bike in parking. Removed all extras (wardrobe, coffee table, TV, plant, stove, sink, fridge, chairs around dining, vanity, shower, bookshelf, washer, balcony plants). User adds everything else via Furniture tool.
+- Fixed furniture editability: the nested SVG furniture symbols were intercepting pointer events. Fixed by adding pointerEvents="none" to the symbol group and using fill="white" fillOpacity={0.001} pointerEvents="all" on the invisible hit rect (transparent fill doesn't receive SVG pointer events in some browsers). Now ALL furniture (AI-placed + user-placed) is selectable, movable, rotatable, resizable, deletable.
+- Added human-in-the-loop Floor Distribution Dialog: when generating a multi-floor blueprint, a modal appears showing the proposed room distribution per floor with ↑/↓ arrows to move rooms between floors. User confirms before generation. Added floorAssignment field to ProjectConfig type and updated distributeRoomsByFloor() to respect it. This prevents misconceptions about room placement across floors.
+- Rebuilt 3D viewer to match reference clay/low-poly render:
+  • Added drei <Edges> component to all walls, floor slabs, door panels, and windows for the signature black edge outlines
+  • Changed wall colors from white to warm beige/cream (#e8e4de for modern, #ece8e2 for minimal, #e4dac8 for traditional, #eae6de for contemporary, #f2ede2 for luxury)
+  • Changed floor slab colors to slightly darker beige (#d8d2c8)
+  • Changed background from sky blue to warm cream (#f0ece4) with soft fog
+  • Softened lighting: ambient 1.0, hemisphere warm (#fff8f0/#e8e4dc), directional 0.8 (was 1.5) for overcast feel
+  • Sky: increased turbidity (10) and reduced rayleigh (0.6) for muted overcast look
+  • Windows: frosted white glass (#f5f5f0, opacity 0.85) with black frame outlines (Edges) matching reference
+  • Ground: warm beige (#e4dfd5) instead of cool gray
+  • Floor slab roughness increased (0.5) for matte clay look instead of glossy
+
+Verification (Agent Browser + VLM):
+- Floor distribution dialog: appears for 2-floor blueprint, shows Ground/First floor with rooms, ↑/↓ arrows work, Confirm & Generate works
+- Layout valid, 11 rooms, 2400 sq.ft, score 98/100
+- Furniture editing: selected sofa → Furniture Editor appears with Position/Size/Rotation(0°/90°/180°/270°)/Floor/Color/Delete controls; rotation works
+- AI auto-furniture: only essentials (1 per room) — bed, sofa, counter, dining table, toilet, desk, altar, car+bike
+- 3D clay render: VLM rates 10/10 black edge outlines, 9/10 warm palette, 10/10 soft lighting, 9/10 professional clay quality
+- Lint clean, HTTP 200, no runtime errors
+
+Stage Summary:
+- AI furniture is now editable (fixed pointer-events issue)
+- AI only adds essential furniture (1 per room); user manages the rest
+- Human-in-the-loop floor distribution prevents multi-room arrangement misconceptions
+- 3D rebuilt as professional clay/low-poly render with black edge outlines matching reference image

@@ -526,7 +526,33 @@ function bspPack(rect: Rect, rooms: RoomRequirement[], strategy: LayoutStrategy)
 // Distribute room requirements across floors.
 // Ground floor: parking, living, kitchen, staircase (+ dining only if no parking), 1 bathroom.
 // Upper floors: bedrooms, bathrooms, dining (if parking present), balcony, pooja, office, utility.
-function distributeRoomsByFloor(reqs: RoomRequirement[], floors: number): RoomRequirement[][] {
+// If config.floorAssignment is provided, use it instead of the default distribution.
+function distributeRoomsByFloor(reqs: RoomRequirement[], floors: number, floorAssignment?: Record<string, number[]>): RoomRequirement[][] {
+  // If user provided a floor assignment, use it
+  if (floorAssignment) {
+    const expanded = expandRequirements(reqs);
+    const byFloor: RoomRequirement[][] = Array.from({ length: floors }, () => []);
+    const counters: Record<string, number> = {};
+    for (const r of expanded) {
+      const assignment = floorAssignment[r.type];
+      const idx = counters[r.type] || 0;
+      counters[r.type] = idx + 1;
+      // Find which floor this instance should go on
+      let targetFloor = 0;
+      if (assignment) {
+        let acc = 0;
+        for (let f = 0; f < assignment.length; f++) {
+          acc += assignment[f];
+          if (idx < acc) { targetFloor = f; break; }
+        }
+        targetFloor = Math.min(targetFloor, floors - 1);
+      }
+      byFloor[targetFloor].push(r);
+    }
+    return byFloor;
+  }
+
+  // Default automatic distribution
   const expanded = expandRequirements(reqs);
   const byFloor: RoomRequirement[][] = Array.from({ length: floors }, () => []);
   const hasParking = expanded.some((r) => r.type === 'parking');
@@ -585,7 +611,7 @@ function roadWallSide(p: Rect, plot: PlotConfig): DoorMarker['wall'] {
 
 export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy): LayoutData {
   const rooms: RoomRect[] = [];
-  const byFloor = distributeRoomsByFloor(config.rooms, config.floors);
+  const byFloor = distributeRoomsByFloor(config.rooms, config.floors, config.floorAssignment);
   for (let f = 0; f < config.floors; f++) {
     const floorRooms = generateFloorLayout(config, strategy, f, byFloor[f] || []);
     rooms.push(...floorRooms);
@@ -601,7 +627,8 @@ export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy):
   };
 }
 
-// Auto-place sensible starter furniture in each room (bed in bedroom, sofa in living, etc.)
+// Auto-place ONLY minimal essential furniture (one key item per room).
+// The user adds everything else via the Furniture tool.
 function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem[] {
   const items: import('../types').FurnitureItem[] = [];
   for (const room of rooms) {
@@ -609,68 +636,48 @@ function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem
     const inset = 1;
     switch (room.type) {
       case 'bedroom': {
+        // Just a bed — the essential. User adds wardrobe, side table, etc.
         const bedW = Math.min(6, room.width - 2);
         const bedL = Math.min(7, room.length - 2);
         items.push(mkFurniture('bed-double', room.x + inset, room.y + inset, bedW, bedL, room.floor, 0));
-        if (room.width > 10) {
-          items.push(mkFurniture('wardrobe', room.x + room.width - 6, room.y + room.length - 2.5, 6, 2, room.floor, 0));
-        }
         break;
       }
       case 'living': {
+        // Just a sofa — the essential. User adds coffee table, TV, plants, etc.
         const sofaW = Math.min(7, room.width - 2);
         items.push(mkFurniture('sofa-3', room.x + (room.width - sofaW) / 2, room.y + inset, sofaW, 3, room.floor, 0));
-        items.push(mkFurniture('table-coffee', center.x - 2, center.y - 1, 4, 2, room.floor, 0));
-        if (room.width > 10) {
-          items.push(mkFurniture('tv-unit', room.x + (room.width - 5) / 2, room.y + room.length - 2, 5, 1.5, room.floor, 0));
-        }
-        items.push(mkFurniture('plant-small', room.x + room.width - 2, room.y + 0.5, 1.5, 1.5, room.floor, 0));
         break;
       }
       case 'kitchen': {
+        // Just a kitchen counter — the essential. User adds stove, sink, fridge, island.
         items.push(mkFurniture('kitchen-counter', room.x + inset, room.y + inset, Math.min(8, room.width - 2), 2, room.floor, 0));
-        items.push(mkFurniture('stove', room.x + inset, room.y + inset, 3, 2, room.floor, 0));
-        items.push(mkFurniture('sink-kitchen', room.x + 4, room.y + inset, 2.5, 1.5, room.floor, 0));
-        if (room.width > 9) {
-          items.push(mkFurniture('fridge', room.x + room.width - 3.5, room.y + inset, 3, 2.5, room.floor, 0));
-        }
         break;
       }
       case 'dining': {
+        // Just a dining table — the essential. User adds chairs.
         items.push(mkFurniture('table-dining-6', center.x - 2.5, center.y - 1.5, 5, 3, room.floor, 0));
-        // 4 chairs around
-        items.push(mkFurniture('chair-dining', center.x - 2.5, center.y - 0.5, 1.5, 1.5, room.floor, 0));
-        items.push(mkFurniture('chair-dining', center.x + 1, center.y - 0.5, 1.5, 1.5, room.floor, 0));
-        items.push(mkFurniture('chair-dining', center.x - 2.5, center.y + 1.5, 1.5, 1.5, room.floor, 180));
-        items.push(mkFurniture('chair-dining', center.x + 1, center.y + 1.5, 1.5, 1.5, room.floor, 180));
         break;
       }
       case 'bathroom': {
+        // Just a toilet — the essential. User adds vanity, shower, bathtub.
         items.push(mkFurniture('toilet', room.x + inset, room.y + inset, 2, 3, room.floor, 0));
-        items.push(mkFurniture('vanity', room.x + room.width - 3.5, room.y + inset, 3, 1.5, room.floor, 0));
-        if (room.length > 7) {
-          items.push(mkFurniture('shower', room.x + inset, room.y + room.length - 3.5, 3, 3, room.floor, 0));
-        }
         break;
       }
       case 'office': {
+        // Just a desk — the essential. User adds chair, bookshelf.
         items.push(mkFurniture('desk', center.x - 2.5, room.y + inset, 5, 2.5, room.floor, 0));
-        items.push(mkFurniture('chair-office', center.x - 1, room.y + 3.5, 2, 2, room.floor, 0));
-        if (room.width > 8) {
-          items.push(mkFurniture('bookshelf', room.x + room.width - 4.5, room.y + inset, 4, 1, room.floor, 0));
-        }
         break;
       }
       case 'pooja': {
+        // Just the altar — the essential.
         items.push(mkFurniture('pooja-altar', center.x - 1.5, room.y + inset, 3, 1.5, room.floor, 0));
         break;
       }
       case 'parking': {
-        // Add a car + a bike to parking rooms (Indian standard: 1 car + 1 bike per dwelling)
+        // Car + bike are standard/essential for Indian homes.
         const carW = Math.min(6, room.width - 2);
         const carL = Math.min(10, room.length - 2);
         items.push(mkFurniture('car', room.x + 1, room.y + (room.length - carL) / 2, carW, carL, room.floor, 0));
-        // bike in the remaining space
         const bikeW = 2.5;
         const bikeL = 6;
         const bikeX = room.x + 1 + carW + 1;
@@ -679,19 +686,14 @@ function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem
         }
         break;
       }
-      case 'staircase': {
-        // no furniture (stairs rendered as room texture)
+      case 'staircase':
+      case 'balcony':
+      case 'utility':
+      case 'foyer':
+      case 'store':
+      default:
+        // No auto-furniture — user furnishes these.
         break;
-      }
-      case 'balcony': {
-        items.push(mkFurniture('plant-small', room.x + inset, room.y + inset, 1.5, 1.5, room.floor, 0));
-        items.push(mkFurniture('plant-small', room.x + room.width - 2, room.y + inset, 1.5, 1.5, room.floor, 0));
-        break;
-      }
-      case 'utility': {
-        items.push(mkFurniture('washer', room.x + inset, room.y + inset, 2.5, 2.5, room.floor, 0));
-        break;
-      }
     }
   }
   return items;

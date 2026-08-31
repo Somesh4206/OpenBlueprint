@@ -674,11 +674,12 @@ function FurnitureShape({
 
   return (
     <g style={{ opacity, cursor: 'move' }} transform={`translate(${tx} ${ty}) rotate(${item.rotation} ${bw / 2} ${bl / 2})`}>
-      {/* invisible hit area covering the bounding box */}
-      <rect data-furniture-id={item.id} x={0} y={0} width={bw} height={bl} fill="transparent" />
-      {/* the symbol — a nested <svg> scaled to the furniture size */}
-      <g data-furniture-id={item.id} transform={`scale(${sx} ${sy})`}>
-        <svg viewBox="0 0 100 100" width={100} height={100} style={{ overflow: 'visible' }}>
+      {/* invisible hit area covering the bounding box — receives all pointer events.
+          fill with near-invisible opacity so SVG pointer-events:"all" works in all browsers */}
+      <rect data-furniture-id={item.id} x={0} y={0} width={bw} height={bl} fill="white" fillOpacity={0.001} pointerEvents="all" />
+      {/* the symbol — pointer-events: none so clicks pass through to the hit area */}
+      <g transform={`scale(${sx} ${sy})`} pointerEvents="none">
+        <svg viewBox="0 0 100 100" width={100} height={100} style={{ overflow: 'visible', pointerEvents: 'none' }}>
           <FurnitureSymbol type={item.type} color={color} className="w-full h-full" />
         </svg>
       </g>

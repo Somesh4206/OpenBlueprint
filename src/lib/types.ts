@@ -129,6 +129,10 @@ export interface ProjectConfig {
   preferences: PreferenceKey[];
   vastuEnabled: boolean;
   vastu: VastuPrefs;
+  // Human-in-the-loop floor assignment: maps room type → array of counts per floor.
+  // e.g. { bedroom: [1, 2] } = 1 bedroom on ground, 2 on first.
+  // If absent, the engine distributes automatically.
+  floorAssignment?: Record<string, number[]>;
 }
 
 export type DesignStyle =

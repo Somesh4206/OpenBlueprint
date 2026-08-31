@@ -24,6 +24,8 @@ import {
   Plus,
   Minus,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Compass,
   CheckCircle2,
   Loader2,
@@ -68,6 +70,7 @@ export function Wizard() {
   const setWizardConfig = useApp((s) => s.setWizardConfig);
   const setDesigns = useApp((s) => s.setDesigns);
   const [step, setStep] = useState(0);
+  const [showFloorDialog, setShowFloorDialog] = useState(false);
 
   function next() {
     if (step < 3) setStep(step + 1);
@@ -78,12 +81,22 @@ export function Wizard() {
   }
 
   async function generate() {
+    // For multi-floor buildings, show the floor distribution dialog first
+    // (human-in-the-loop to avoid misconceptions about room placement)
+    if (wizardConfig.floors > 1) {
+      setShowFloorDialog(true);
+    } else {
+      doGenerate();
+    }
+  }
+
+  async function doGenerate() {
+    setShowFloorDialog(false);
     setView({
       name: 'design-options',
       config: wizardConfig,
       designs: [],
     });
-    // generate server-side
     try {
       const res = await fetch('/api/layout/generate', {
         method: 'POST',
@@ -163,6 +176,19 @@ export function Wizard() {
           )}
         </div>
       </footer>
+
+      {/* Human-in-the-loop floor distribution dialog */}
+      {showFloorDialog && (
+        <FloorDistributionDialog
+          config={wizardConfig}
+          onConfirm={(floorAssignment) => {
+            setWizardConfig({ floorAssignment });
+            // need to call doGenerate after state updates
+            setTimeout(() => doGenerate(), 100);
+          }}
+          onCancel={() => setShowFloorDialog(false)}
+        />
+      )}
     </div>
   );
 }
@@ -753,6 +779,169 @@ function SummaryItem({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between p-2 rounded bg-muted/40">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-sm font-medium capitalize tech-num">{value}</span>
+    </div>
+  );
+}
+
+// ---------------- Floor Distribution Dialog (Human-in-the-loop) ----------------
+function FloorDistributionDialog({
+  config,
+  onConfirm,
+  onCancel,
+}: {
+  config: ProjectConfig;
+  onConfirm: (floorAssignment: Record<string, number[]>) => void;
+  onCancel: () => void;
+}) {
+  const floors = config.floors;
+  const floorLabels = ['Ground Floor', 'First Floor', 'Second Floor', 'Third Floor'];
+
+  // Build the default distribution (same logic as engine)
+  const hasParking = config.rooms.some((r) => r.type === 'parking');
+  const groundTypes = hasParking && floors > 1
+    ? new Set(['parking', 'living', 'kitchen', 'foyer', 'store', 'staircase'])
+    : new Set(['parking', 'living', 'dining', 'kitchen', 'foyer', 'store', 'staircase']);
+
+  // State: floorAssignment maps room type → [count per floor]
+  const [assignment, setAssignment] = useState<Record<string, number[]>>(() => {
+    const init: Record<string, number[]> = {};
+    for (const r of config.rooms) {
+      const cat = ROOM_CATALOG[r.type];
+      if (r.type === 'staircase' && floors > 1) {
+        init[r.type] = Array(floors).fill(0).map((_, i) => i === 0 ? 1 : 1); // staircase on all floors
+        continue;
+      }
+      if (r.type === 'parking') {
+        init[r.type] = Array(floors).fill(0).map((_, i) => i === 0 ? r.count : 0);
+        continue;
+      }
+      if (groundTypes.has(r.type)) {
+        const arr = Array(floors).fill(0);
+        arr[0] = r.count;
+        init[r.type] = arr;
+      } else {
+        // distribute across upper floors
+        const arr = Array(floors).fill(0);
+        if (floors === 1) {
+          arr[0] = r.count;
+        } else {
+          // bathrooms: 1 on ground if no parking, rest upstairs
+          if (r.type === 'bathroom' && !hasParking && floors > 1) {
+            arr[0] = 1;
+            const rest = r.count - 1;
+            for (let f = 1; f < floors && rest > 0; f++) {
+              arr[f] = Math.ceil(rest / (floors - f));
+            }
+          } else {
+            const rest = r.count;
+            for (let f = 1; f < floors && rest > 0; f++) {
+              arr[f] = Math.ceil(rest / (floors - f));
+            }
+          }
+        }
+        init[r.type] = arr;
+      }
+    }
+    return init;
+  });
+
+  function moveUp(type: string, floor: number) {
+    if (floor <= 0) return;
+    setAssignment((prev) => {
+      const arr = [...(prev[type] || [])];
+      if (arr[floor] > 0) {
+        arr[floor]--;
+        arr[floor - 1]++;
+      }
+      return { ...prev, [type]: arr };
+    });
+  }
+  function moveDown(type: string, floor: number) {
+    if (floor >= floors - 1) return;
+    setAssignment((prev) => {
+      const arr = [...(prev[type] || [])];
+      if (arr[floor] > 0) {
+        arr[floor]--;
+        arr[floor + 1]++;
+      }
+      return { ...prev, [type]: arr };
+    });
+  }
+
+  // Group rooms by floor for display
+  const floorRooms: { type: string; name: string; count: number }[][] = Array.from({ length: floors }, () => []);
+  for (const r of config.rooms) {
+    const arr = assignment[r.type] || [];
+    for (let f = 0; f < floors; f++) {
+      const count = arr[f] || 0;
+      if (count > 0) {
+        floorRooms[f].push({ type: r.type, name: ROOM_CATALOG[r.type]?.label || r.type, count });
+      }
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onCancel}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-card rounded-xl shadow-2xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-5 border-b border-border">
+          <h2 className="text-lg font-bold mb-1" style={{ fontFamily: 'var(--font-display)' }}>Confirm Floor Distribution</h2>
+          <p className="text-sm text-muted-foreground">
+            Your building has <b>{floors} floor{floors > 1 ? 's' : ''}</b>. Review which rooms go on each floor and adjust if needed. This prevents layout misconceptions.
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto scroll-thin p-5">
+          <div className={`grid gap-4 ${floors === 2 ? 'grid-cols-2' : floors === 3 ? 'grid-cols-3' : 'grid-cols-1'}`}>
+            {Array.from({ length: floors }, (_, f) => (
+              <div key={f} className="rounded-lg border border-border bg-muted/20 p-3">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold" style={{ fontFamily: 'var(--font-display)' }}>{floorLabels[f]}</h3>
+                  <Badge variant="secondary" className="tech-num text-[10px]">{floorRooms[f].reduce((s, r) => s + r.count, 0)} rooms</Badge>
+                </div>
+                <div className="space-y-2">
+                  {floorRooms[f].length === 0 && <p className="text-xs text-muted-foreground italic py-4 text-center">No rooms</p>}
+                  {floorRooms[f].map((r, i) => (
+                    <div key={i} className="flex items-center justify-between p-2 rounded bg-background border border-border/60">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-medium truncate">{r.name}</span>
+                        {r.count > 1 && <Badge variant="outline" className="tech-num text-[9px] shrink-0">×{r.count}</Badge>}
+                      </div>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button onClick={() => moveUp(r.type, f)} disabled={f === 0} className="size-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed">
+                          <ChevronUp className="size-3" />
+                        </button>
+                        <button onClick={() => moveDown(r.type, f)} disabled={f === floors - 1} className="size-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-20 disabled:cursor-not-allowed">
+                          <ChevronDown className="size-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 p-3 rounded-lg bg-amber-soft/10 border border-amber-soft/30">
+            <p className="text-xs text-muted-foreground">
+              <b>Tip:</b> Use the ↑/↓ arrows to move rooms between floors. Typical Indian layout: Ground floor = parking, living, kitchen, dining. Upper floors = bedrooms, bathrooms, pooja, balcony. Staircase connects all floors.
+            </p>
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-border flex items-center justify-between gap-2">
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => onConfirm(assignment)} className="gap-1.5">
+              <Sparkles className="size-4" /> Confirm & Generate
+            </Button>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }
