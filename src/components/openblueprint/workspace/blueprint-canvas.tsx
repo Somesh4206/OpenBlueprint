@@ -34,7 +34,7 @@ interface Props {
   validation: ValidationResult;
 }
 
-type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'furniture-move' | 'furniture-rotate' | null;
+type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'furniture-move' | 'furniture-rotate' | 'furniture-resize' | null;
 
 interface DragState {
   roomId?: string;
@@ -145,6 +145,8 @@ export function BlueprintCanvas({
         onSelectFurniture(f.id);
         if (furnitureHandle === 'rotate') {
           setDrag({ furnitureId, mode: 'furniture-rotate', startMouse: { x: e.clientX, y: e.clientY }, startFurniture: { ...f } });
+        } else if (furnitureHandle === 'resize') {
+          setDrag({ furnitureId, mode: 'furniture-resize', startMouse: { x: e.clientX, y: e.clientY }, startFurniture: { ...f } });
         } else {
           setDrag({ furnitureId, mode: 'furniture-move', startMouse: { x: e.clientX, y: e.clientY }, startFurniture: { ...f } });
         }
@@ -201,6 +203,20 @@ export function BlueprintCanvas({
       const f = drag.startFurniture;
       const newRot = ((Math.round((f.rotation + dx) / 90) * 90) % 360 + 360) % 360;
       onUpdateFurniture(drag.furnitureId!, { rotation: newRot });
+      return;
+    }
+    if (drag.mode === 'furniture-resize' && drag.startFurniture) {
+      // resize: drag bottom-right corner to change width + length
+      const f = drag.startFurniture;
+      const newW = snap(Math.max(1, f.width + dx));
+      const newL = snap(Math.max(1, f.length + dy));
+      // clamp so furniture stays within plot
+      const maxX = plot.width - f.x;
+      const maxY = plot.length - f.y;
+      onUpdateFurniture(drag.furnitureId!, {
+        width: Math.min(newW, maxX),
+        length: Math.min(newL, maxY),
+      });
       return;
     }
 
@@ -687,6 +703,12 @@ function FurnitureShape({
       {selected && (
         <>
           <rect x={-2} y={-2} width={bw + 4} height={bl + 4} fill="none" stroke={accentColor} strokeWidth={1.5} strokeDasharray="4 2" pointerEvents="none" />
+          {/* resize handle (bottom-right corner) — drag to resize */}
+          <g data-furniture-id={item.id} data-furniture-handle="resize" style={{ cursor: 'nwse-resize' }}>
+            <rect x={bw - 5} y={bl - 5} width={10} height={10} fill={accentColor} stroke="white" strokeWidth={1.5} rx={2} />
+            <line x1={bw - 2} y1={bl - 2} x2={bw + 2} y2={bl + 2} stroke="white" strokeWidth={1} />
+            <line x1={bw + 2} y1={bl - 2} x2={bw - 2} y2={bl + 2} stroke="white" strokeWidth={1} opacity={0.5} />
+          </g>
           {/* rotate handle (top-right) */}
           <g data-furniture-id={item.id} data-furniture-handle="rotate" style={{ cursor: 'grab' }}>
             <circle cx={bw + 12} cy={-12} r={7} fill={accentColor} stroke="white" strokeWidth={1.5} />

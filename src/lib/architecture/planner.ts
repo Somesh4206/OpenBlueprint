@@ -99,7 +99,25 @@ export function allocateZones(
     for (const c of nonEmpty) {
       if (c.zone === 'public') c.rect = publicRect;
       else if (c.zone === 'private') c.rect = privateRect;
-      else c.rect = publicRect; // circulation goes with public
+      else c.rect = publicRect; // circulation/service go with public
+    }
+  } else if (hasService && hasPublic) {
+    // Public + Service (no private on this floor): service on side, public gets the rest
+    const serviceDepth = Math.min(buildable.w * 0.25, 10);
+    const serviceRect: Rect = { x: buildable.x + buildable.w - serviceDepth, y: buildable.y, w: serviceDepth, h: buildable.h };
+    const publicRect: Rect = { x: buildable.x, y: buildable.y, w: buildable.w - serviceDepth, h: buildable.h };
+    for (const c of nonEmpty) {
+      if (c.zone === 'service') c.rect = serviceRect;
+      else c.rect = publicRect;
+    }
+  } else if (hasService && hasPrivate) {
+    // Private + Service (no public): service on side, private gets the rest
+    const serviceDepth = Math.min(buildable.w * 0.25, 10);
+    const serviceRect: Rect = { x: buildable.x + buildable.w - serviceDepth, y: buildable.y, w: serviceDepth, h: buildable.h };
+    const privateRect: Rect = { x: buildable.x, y: buildable.y, w: buildable.w - serviceDepth, h: buildable.h };
+    for (const c of nonEmpty) {
+      if (c.zone === 'service') c.rect = serviceRect;
+      else c.rect = privateRect;
     }
   } else {
     // Single zone or service-only: use full buildable
@@ -193,15 +211,16 @@ function bspPackZone(rect: Rect, rooms: RoomRequirement[]): Placed[] {
 }
 
 // Post-placement adjustment: try to swap rooms to satisfy desired adjacencies.
-// This is a simple greedy pass — for each room with a desired adjacency, check
-// if swapping it with a neighbor would improve adjacency satisfaction.
+// Only swaps rooms WITHIN THE SAME ZONE to preserve zone clustering.
 export function optimizeAdjacencies(rooms: RoomRect[]): RoomRect[] {
   let improved = [...rooms];
   let bestScore = scoreAdjacencies(improved);
-  for (let iter = 0; iter < 20; iter++) {
+  for (let iter = 0; iter < 15; iter++) {
     let changed = false;
     for (let i = 0; i < improved.length; i++) {
       for (let j = i + 1; j < improved.length; j++) {
+        // only swap rooms in the same zone
+        if (zoneOf(improved[i].type) !== zoneOf(improved[j].type)) continue;
         // swap positions
         const trial = [...improved];
         const a = { ...trial[i], x: trial[j].x, y: trial[j].y, width: trial[j].width, length: trial[j].length };

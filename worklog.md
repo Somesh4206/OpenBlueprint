@@ -388,3 +388,35 @@ Stage Summary:
 - Minimum code standards checked (areas, widths, primary room)
 - Privacy gradient and zone clustering validated
 - AI assistant now aware of all 8 rules via system prompt
+
+---
+Task ID: 9 (floor dialog fix + furniture resize + zone overlap fix)
+Agent: main
+Task: Fix human-in-the-loop floor dialog, add furniture resize handles, fix zone overlap with all room types
+
+Work Log:
+- Verified floor distribution dialog works: appears for 2+ floors, shows Ground/First/Second floor columns with rooms, ↑/↓ arrows to move rooms, Confirm & Generate button. Tested with 2 and 3 floors.
+- Added furniture resize handle (bottom-right corner) to FurnitureShape in blueprint-canvas.tsx:
+  • New 'furniture-resize' drag mode
+  • Resize handle (10×10 rect with arrows) at bottom-right corner of selected furniture
+  • Drag to resize width + length simultaneously, clamped to plot boundaries
+  • Snap-to-grid (0.5ft)
+- Verified furniture rotation works 3 ways: rotate handle (drag), R keyboard shortcut, rotation buttons (0°/90°/180°/270°) in editor
+- Verified furniture resize works 2 ways: resize handle (drag on canvas), width/length inputs in editor
+- Fixed zone allocation overlap bug: when a floor has only public + service zones (no private, e.g. ground floor with store), the service zone was getting the full buildable rect instead of a side strip. Added two new allocation cases: hasService+hasPublic and hasService+hasPrivate, each giving service a 25%-width side strip.
+- Fixed adjacency optimizer: was swapping rooms across zones (breaking zone clustering). Now only swaps rooms within the same zone.
+- Verified all room types (12 types: bedroom, bathroom, kitchen, living, dining, parking, balcony, pooja, office, utility, store, staircase) on 40×50 2-floor plot: 17 rooms, 0 overlaps, score 84.
+- Verified 1/2/3 floor configs: all 0 overlaps, scores 89/97/96.
+
+Verification:
+- Floor dialog: appears for multi-floor, shows correct room distribution, confirm works
+- Furniture: selectable (all items including AI-placed), rotatable (handle + R key + buttons), resizable (handle drag + numeric inputs), deletable
+- All 3 handles visible on selected furniture: resize (bottom-right), rotate (top-right), delete (top-left)
+- Zone clustering: public front, private rear, service side — no overlaps across all configurations
+- Lint clean, HTTP 200
+
+Stage Summary:
+- Human-in-the-loop floor dialog verified working for 2 and 3 floors
+- Furniture fully editable: move, rotate (3 methods), resize (2 methods), delete
+- Zone allocation fixed for all zone combinations (public+private, public+service, private+service, single zone)
+- 0 overlaps across all tested configurations (1/2/3 floors, 9-17 rooms)
