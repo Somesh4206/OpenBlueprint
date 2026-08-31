@@ -12,6 +12,7 @@ import {
 import { ROOM_CATALOG } from '../room-catalog';
 import { scoreLayout } from './scoring';
 import { validateLayout } from './validation';
+import { allocateZones, placeZoneRooms, optimizeAdjacencies } from '../architecture/planner';
 
 export { scoreLayout, validateLayout };
 
@@ -362,10 +363,11 @@ export function generateFloorLayout(
 
   const wantsParking = reqs.some((r) => r.type === 'parking');
   let partitionRect = buildable;
+  let parkingReq: RoomRequirement | null = null;
   if (floor === 0 && wantsParking) {
     const { parking, rest } = placeParkingStrip(buildable, config.plot.roadSide);
     if (parking) {
-      const parkingReq = reqs.find((r) => r.type === 'parking')!;
+      parkingReq = reqs.find((r) => r.type === 'parking')!;
       const pr: RoomRect = {
         id: genId(),
         type: 'parking',
@@ -384,29 +386,29 @@ export function generateFloorLayout(
     }
   }
 
-  const sorted = shuffleByStrategy(reqs, strategy);
+  // ---- ZONE-BASED PLACEMENT (enforces zone clustering + adjacency) ----
+  // Allocate zone regions within the buildable area, then BSP-pack rooms
+  // within each zone sorted by privacy gradient.
+  const zones = allocateZones(partitionRect, reqs, config.plot);
+  for (const zone of zones) {
+    const zoneRooms = placeZoneRooms(zone, floor, config.plot, strategy);
+    out.push(...zoneRooms);
+  }
 
-  // ---- BSP (Binary Space Partition) packing — zero wasted space ----
-  // Recursively split the partition rectangle so every room fills its allocated
-  // leaf exactly. Rooms tile the buildable area with no gaps between them.
-  const placed = bspPack(partitionRect, sorted, strategy);
+  // ---- Adjacency optimization: swap rooms to satisfy desired adjacencies ----
+  // Only swap rooms of the same zone to preserve zone clustering.
+  const nonParking = out.filter((r) => r.type !== 'parking');
+  const optimized = optimizeAdjacencies(nonParking);
+  // replace non-parking rooms with optimized versions
+  const parkingRooms = out.filter((r) => r.type === 'parking');
+  out.length = 0;
+  out.push(...parkingRooms, ...optimized);
 
-  for (const p of placed) {
-    const roomRect: RoomRect = {
-      id: genId(),
-      type: p.req.type,
-      name: p.req.name || ROOM_CATALOG[p.req.type].defaultName,
-      x: round(p.rect.x),
-      y: round(p.rect.y),
-      width: round(p.rect.w),
-      length: round(p.rect.h),
-      floor,
-      doors: [],
-      windows: [],
-    };
-    roomRect.doors = autoDoors(roomRect, config.plot, config.plot.roadSide);
-    roomRect.windows = autoWindows(roomRect, config.plot);
-    out.push(roomRect);
+  // ---- Auto doors & windows ----
+  for (let i = 0; i < out.length; i++) {
+    if (out[i].type === 'parking') continue; // parking already has its door
+    out[i].doors = autoDoors(out[i], config.plot, config.plot.roadSide);
+    out[i].windows = autoWindows(out[i], config.plot);
   }
 
   return out;

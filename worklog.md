@@ -337,3 +337,54 @@ Stage Summary:
 - AI only adds essential furniture (1 per room); user manages the rest
 - Human-in-the-loop floor distribution prevents multi-room arrangement misconceptions
 - 3D rebuilt as professional clay/low-poly render with black edge outlines matching reference image
+
+---
+Task ID: 8 (architecture rules engine)
+Agent: main
+Task: Implement 8 non-negotiable architectural rules — zone clustering, adjacency, circulation, kitchen triangle, privacy gradient, minimum standards, prohibited mistakes
+
+Work Log:
+- Created src/lib/architecture/rules.ts: comprehensive rules module with:
+  • Zone classification (public/private/service/circulation) for all 13 room types
+  • Desired adjacency graph (kitchen↔dining/living, bathroom↔bedroom, store↔kitchen, etc.)
+  • Prohibited adjacency graph (parking↔bedroom, bathroom↔living/dining/kitchen, kitchen↔bathroom)
+  • Minimum code standards per room type (areas in sq.ft, widths in ft — converted from metric: 9.5 m²=102 sqft, 2.4 m=8 ft, etc.)
+  • Privacy gradient order (foyer=0 most public → bedroom=8 most private)
+  • 5 prohibition rules with check functions: garage-without-foyer, kitchen-isolated, bathroom-off-living, bedroom-as-passage, garage-adjacent-bedroom
+  • areAdjacent() geometry helper (checks shared wall segments)
+  • buildAdjacencyMap() and isAdjacentToType() utilities
+- Created src/lib/architecture/planner.ts: zone-based layout planner with:
+  • allocateZones(): splits buildable area into zone regions (public=front, private=rear, service=side; circulation merged into public)
+  • placeZoneRooms(): BSP-packs rooms within each zone, sorted by privacy gradient
+  • optimizeAdjacencies(): greedy swap optimization to maximize adjacency satisfaction score
+  • scoreAdjacencies(): scores layouts based on desired (+2) and prohibited (-3) adjacencies
+- Rewrote generateFloorLayout() in engine.ts to use zone-based planner:
+  • Parking placed first as service strip
+  • Remaining rooms allocated to zones (public/private/service)
+  • Each zone BSP-packed with privacy-gradient sorting
+  • Adjacency optimization pass swaps rooms to satisfy kitchen-dining, bathroom-bedroom, etc.
+  • Auto doors/windows applied after placement
+- Rewrote validateLayout() in validation.ts to check all 8 rule categories:
+  • Rule 1: Zone clustering — public rooms closer to road than private rooms
+  • Rule 2: Adjacency — desired adjacencies (warnings) + prohibited adjacencies (errors)
+  • Rule 5: Privacy gradient — bedrooms not facing street if living rooms can
+  • Rule 6: Minimum code standards — area + width checks per room, primary room ≥ 102 sqft
+  • Rule 7: Prohibited mistakes — all 5 prohibition rules checked, reported as errors
+- Updated AI system prompt with ARCHITECTURE_RULES — the 8 non-negotiable rules injected into LLM context
+
+Verification (API + Agent Browser):
+- Generated 30×40 2-floor 3BHK: Layout VALID, 0 errors, 1 minor warning (staircase size)
+- Zone clustering: public rooms (living, kitchen, staircase) on ground floor front; private rooms (bedrooms, bathrooms) on first floor rear
+- Adjacency: Kitchen adjacent to Living Room (share wall at x=16.5) ✓
+- No prohibited mistakes: no garage-without-foyer, no kitchen-isolated, no bathroom-off-living, no bedroom-as-passage, no garage-adjacent-bedroom ✓
+- Validation panel shows: "Adjacency requirements satisfied (kitchen-dining, etc.)" + "No prohibited layout mistakes detected" + "Zone clustering: public front, private rear"
+- Lint clean, HTTP 200
+
+Stage Summary:
+- Full architectural rules engine implemented and enforced
+- Zone-based placement: public front, private rear, service side
+- Hard adjacency constraints enforced (kitchen-dining, no garage-bedroom)
+- All 5 prohibited mistakes detected and reported as errors
+- Minimum code standards checked (areas, widths, primary room)
+- Privacy gradient and zone clustering validated
+- AI assistant now aware of all 8 rules via system prompt

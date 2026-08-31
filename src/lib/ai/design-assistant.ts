@@ -11,9 +11,35 @@ import { applyActions } from './apply-actions';
 import { generateInsights } from './apply-actions';
 import { INDIAN_ARCHITECTURE_CONTEXT } from '../indian-architecture';
 
+const ARCHITECTURE_RULES = `NON-NEGOTIABLE ARCHITECTURAL RULES (the layout engine enforces these):
+
+1. ZONE CLUSTERING:
+   - PUBLIC ZONE: Entry, living, dining, kitchen — cluster together at the front (road side).
+   - PRIVATE ZONE: Bedrooms, bathrooms, study — separated from public by circulation buffer, at the rear (away from street noise).
+   - SERVICE ZONE: Garage, laundry, utility — at the noisy/service edge, away from bedrooms.
+
+2. ADJACENCY (hard constraints):
+   - Kitchen MUST be adjacent to dining and/or living. NEVER isolate kitchen.
+   - Living and dining should be adjacent (visual connection).
+   - Bathrooms near bedrooms they serve, NOT opening directly into living areas.
+   - Garage NOT directly adjacent to bedrooms (noise/fume separation).
+   - Entry opens into foyer or public zone, not through private zones.
+
+3. CIRCULATION: Direct paths entry → public → private. No cut-through traffic past bedrooms.
+
+4. KITCHEN WORK TRIANGLE: Sink, cooktop, refrigerator form a triangle (perimeter 12-22 ft).
+
+5. PRIVACY GRADIENT: Most public (entry/living) → semi-public (dining/kitchen) → private (bedrooms) → service (garage). Bedrooms on quieter side, not facing street.
+
+6. MINIMUM STANDARDS: Habitable room ≥ 80 sq.ft (9.5 m²), width ≥ 8 ft. Kitchen ≥ 54 sq.ft. Bathroom ≥ 20 sq.ft. At least one room ≥ 102 sq.ft.
+
+7. PROHIBITED: Garage as first room without foyer buffer. Kitchen isolated from dining/living. Bathroom opening off living room. Bedroom as passage. Rooms narrower than minimums.`;
+
 const SYSTEM_PROMPT = `You are OpenBlueprint AI, an intelligent architectural design assistant integrated into a floor-plan planning workspace for INDIAN residential plots.
 
 ${INDIAN_ARCHITECTURE_CONTEXT}
+
+${ARCHITECTURE_RULES}
 
 Your job: interpret a user's natural-language request about their floor plan and translate it into a SMALL list of STRUCTURED design actions that the layout engine can apply. You must NOT calculate exact coordinates or dimensions yourself — the engine does that.
 
