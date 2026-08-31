@@ -113,7 +113,7 @@ export function renderBlueprintSVG(layout: LayoutData, opts: RenderOptions = {})
     // doors
     if (showDoors && !compact) {
       for (const d of room.doors) {
-        parts.push(...renderDoor(room, d, rx, ry, rw, rl, padding, scale, accent));
+        parts.push(...renderDoor(room, d, rx, ry, rw, rl, padding, scale, accent, bg));
       }
     }
     // windows
@@ -158,6 +158,7 @@ function renderDoor(
   _padding: number,
   scale: number,
   accent: string,
+  bgColor: string,
 ): string[] {
   const dw = d.width * scale;
   let x1 = 0,
@@ -211,13 +212,9 @@ function renderDoor(
       break;
   }
   return [
-    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${bg()}" stroke-width="3"/>`,
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${bgColor}" stroke-width="3"/>`,
     `<path d="M ${ax1} ${ay1} A ${dw} ${dw} 0 0 1 ${ax2} ${ay2}" fill="none" stroke="${accent}" stroke-width="1" opacity="0.7"/>`,
   ];
-}
-
-function bg(): string {
-  return '#fbfbf9';
 }
 
 function renderWindow(

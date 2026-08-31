@@ -1,21 +1,31 @@
 'use client';
 
 // =========================================================================
-// OpenBlueprint — 3D Viewer (Task 5-b rebuild)
-// React Three Fiber + @react-three/drei visualization of a LayoutData model.
+// OpenBlueprint — 3D Viewer (Task 8-b clean rebuild)
+// React Three Fiber + @react-three/drei architectural visualization.
 //
-// Premium-quality scene:
-//   • ACES Filmic tone mapping, antialiased, DPR up to 2
-//   • Image-based lighting via drei <Environment preset="apartment">
-//   • Ambient + hemisphere + key directional sun + soft fill directional
-//   • ContactShadows for ambient occlusion grounding
-//   • Subtle infinite <Grid> that fades with distance
-//   • Thin-shell walls (~0.5ft) with real door gaps + translucent windows
-//   • Per-room desaturated floor slabs
-//   • Multi-floor stacking with inter-floor ceiling slabs + roof
-//   • Realistic flat / overhang / pitched roofs per design style
-//   • Furniture rendered through <FurnitureMesh3D>
-//   • Floating HTML room labels
+// Design goal: BRIGHT, CLEAN, PROFESSIONAL — like a SketchUp + V-Ray render
+// or a clean Twinmotion output. NOT dull, NOT flat, NOT washed out.
+//
+// Visual stack:
+//   • drei <Sky> real atmospheric sky (soft blue gradient + sun glow)
+//   • <Environment preset="city"> image-based lighting for crisp reflections
+//   • Bright ambient (0.8) + hemisphere (0.7) + key sun (1.5) + soft fill (0.5)
+//   • ACES Filmic tone mapping, exposure 1.3 (brighter, cinematic)
+//   • 300×300 light concrete ground (#d4d8de, roughness 0.95)
+//   • Subtle infinite <Grid> (cell 2 / section 10, fadeDistance 120)
+//   • <ContactShadows> for soft ambient-occlusion grounding
+//   • Thin-shell walls (0.5ft) with real door gaps, semi-transparent in
+//     single-floor cutaway view so furniture is clearly visible
+//   • Polished-tile floor slabs (roughness 0.4, metalness 0.05) with a
+//     subtle darker grout-line border for a real tile look
+//   • Glossy translucent cyan glass windows (roughness 0.05, metalness 0.2)
+//   • Warm-wood door panels, modelled as hinged leaves rotated 30° ajar
+//   • Flat / overhang / pitched roofs per design style
+//   • Furniture rendered through <FurnitureMesh3D> (beds, sofas, counters,
+//     car, bike, etc.)
+//   • Floating HTML room labels — clean white pills with accent left border
+//   • 3D north arrow + accent plot outline
 //   • Smooth animated camera rig with 4 presets (orbit / iso / front / top)
 //
 // Coordinate convention (matches furniture-3d.tsx):
@@ -43,6 +53,7 @@ import {
   ContactShadows,
   Grid,
   Environment,
+  Sky,
 } from '@react-three/drei';
 import * as THREE from 'three';
 import { FurnitureMesh3D } from './furniture-3d';
@@ -66,12 +77,11 @@ export interface Viewer3DProps {
 export function Viewer3D(props: Viewer3DProps): React.JSX.Element {
   const { layout } = props;
   const plotW = layout.plot.width;
-  const plotL = layout.plot.length;
   // Initial camera roughly at the orbit preset so first paint matches the rig.
   const initialCam: [number, number, number] = [
-    plotW * 0.8,
-    plotL * 0.7,
-    plotW * 0.9,
+    plotW * 0.75,
+    plotW * 0.65,
+    plotW * 0.85,
   ];
 
   return (
@@ -81,10 +91,10 @@ export function Viewer3D(props: Viewer3DProps): React.JSX.Element {
       gl={{
         antialias: true,
         toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.1,
+        toneMappingExposure: 1.3,
         preserveDrawingBuffer: true,
       }}
-      camera={{ position: initialCam, fov: 45, near: 0.1, far: 1000 }}
+      camera={{ position: initialCam, fov: 45, near: 0.1, far: 2000 }}
     >
       <Suspense fallback={null}>
         <Scene {...props} />
@@ -97,6 +107,12 @@ export default Viewer3D;
 
 // =========================================================================
 // Style configuration
+//   Per spec:
+//     modern:       wall #f5f3ee, height 9,   flat roof
+//     minimal:      wall #fafafa, height 8.5, flat roof
+//     traditional:  wall #ede4d3, height 9.5, pitched roof (warm #7d4f2a)
+//     contemporary: wall #f0ece4, height 10,  flat roof with overhang
+//     luxury:       wall #f8f4ea, height 10.5, flat roof
 // =========================================================================
 
 interface StyleConfig {
@@ -117,40 +133,40 @@ interface StyleConfig {
 const STYLE_CONFIG: Record<DesignStyle, StyleConfig> = {
   modern: {
     wallHeight: 9,
-    wallColor: '#eceae4',
-    wallRoughness: 0.85,
+    wallColor: '#f5f3ee',
+    wallRoughness: 0.75,
     roofType: 'flat',
     roofOverhang: 0,
-    roofOpacity: 0.35,
+    roofOpacity: 0.4,
     windowScale: 1.0,
     accentTrim: false,
     trimColor: '#2b4a7a',
     slabColor: '#cfd5da',
     stairColor: '#a8aeb4',
-    pitchedRoofColor: '#7d5a3a',
+    pitchedRoofColor: '#7d4f2a',
   },
   minimal: {
     wallHeight: 8.5,
-    wallColor: '#f2f0ec',
-    wallRoughness: 0.9,
+    wallColor: '#fafafa',
+    wallRoughness: 0.8,
     roofType: 'flat',
     roofOverhang: 0,
-    roofOpacity: 0.32,
-    windowScale: 0.9,
+    roofOpacity: 0.4,
+    windowScale: 0.95,
     accentTrim: false,
     trimColor: '#525252',
     slabColor: '#c8cace',
     stairColor: '#9ca0a4',
-    pitchedRoofColor: '#7d5a3a',
+    pitchedRoofColor: '#7d4f2a',
   },
   traditional: {
     wallHeight: 9.5,
-    wallColor: '#d9cdb8',
-    wallRoughness: 0.85,
+    wallColor: '#ede4d3',
+    wallRoughness: 0.78,
     roofType: 'pitched',
     roofOverhang: 1.5,
     roofOpacity: 0.85,
-    windowScale: 0.85,
+    windowScale: 0.9,
     accentTrim: true,
     trimColor: '#6b4423',
     slabColor: '#cab7a0',
@@ -159,31 +175,31 @@ const STYLE_CONFIG: Record<DesignStyle, StyleConfig> = {
   },
   contemporary: {
     wallHeight: 10,
-    wallColor: '#e4e0d8',
+    wallColor: '#f0ece4',
     wallRoughness: 0.7,
     roofType: 'overhang',
     roofOverhang: 3,
-    roofOpacity: 0.32,
-    windowScale: 1.25,
+    roofOpacity: 0.4,
+    windowScale: 1.2,
     accentTrim: true,
     trimColor: '#3a3f4a',
     slabColor: '#c2c6cb',
     stairColor: '#9aa0a6',
-    pitchedRoofColor: '#7d5a3a',
+    pitchedRoofColor: '#7d4f2a',
   },
   luxury: {
     wallHeight: 10.5,
-    wallColor: '#efeae0',
-    wallRoughness: 0.55,
+    wallColor: '#f8f4ea',
+    wallRoughness: 0.6,
     roofType: 'flat',
     roofOverhang: 2,
-    roofOpacity: 0.32,
-    windowScale: 1.45,
+    roofOpacity: 0.4,
+    windowScale: 1.35,
     accentTrim: true,
     trimColor: '#9b7a3a',
     slabColor: '#d8cdb5',
     stairColor: '#a89a78',
-    pitchedRoofColor: '#7d5a3a',
+    pitchedRoofColor: '#7d4f2a',
   },
 };
 
@@ -193,11 +209,15 @@ const STYLE_CONFIG: Record<DesignStyle, StyleConfig> = {
 
 const WALL_THICKNESS = 0.5; // ft — proper wall thickness, not paper-thin
 const DOOR_HEIGHT = 7;
+const DOOR_THICKNESS = 0.3;
+const DOOR_OPEN_ANGLE = Math.PI / 6; // 30° — slightly ajar
 const WINDOW_HEIGHT = 4;
 const WINDOW_BOTTOM = 3;
 const FLOOR_HEIGHT = 10; // vertical spacing between stacked floors
 const SLAB_THICKNESS = 0.4;
 const FLOOR_SLAB_THICKNESS = 0.05;
+const GROUT_THICKNESS = 0.02;
+const GROUT_INSET = 0.08; // how far the grout border peeks out beyond the slab
 const PITCH_RATIO = 0.32; // pitched roof apex = footprint width * PITCH_RATIO
 
 // =========================================================================
@@ -261,6 +281,15 @@ function desaturate(hex: string, amount: number): string {
   return `#${c.getHexString()}`;
 }
 
+/** Lighten a hex colour by `amount` (0..1) toward white. */
+function lighten(hex: string, amount: number): string {
+  const c = new THREE.Color(hex);
+  c.r = c.r + (1 - c.r) * amount;
+  c.g = c.g + (1 - c.g) * amount;
+  c.b = c.b + (1 - c.b) * amount;
+  return `#${c.getHexString()}`;
+}
+
 // =========================================================================
 // Computed scene model
 // =========================================================================
@@ -273,6 +302,7 @@ interface SlabData {
   position: [number, number, number];
   size: [number, number];
   color: string;
+  groutColor: string;
 }
 interface LabelData {
   position: [number, number, number];
@@ -286,6 +316,17 @@ interface FurnitureRender {
   worldZ: number;
   worldY: number;
 }
+/**
+ * A hinged door leaf. The group is placed at the hinge position; the panel
+ * is offset by half its width along the local +X (or +Z) axis so the leaf
+ * pivots around the hinge edge when the group is rotated around Y.
+ */
+interface DoorLeafData {
+  hinge: [number, number, number];
+  panelSize: [number, number, number];
+  panelOffset: [number, number, number];
+  rotationY: number;
+}
 interface Footprint {
   minX: number;
   maxX: number;
@@ -298,7 +339,7 @@ interface ComputedScene {
   walls: BoxData[];
   trims: BoxData[];
   windows: BoxData[];
-  doorPanels: BoxData[];
+  doorPanels: DoorLeafData[];
   stairs: BoxData[];
   labels: LabelData[];
   furniture: FurnitureRender[];
@@ -339,7 +380,7 @@ function computeScene(
   const walls: BoxData[] = [];
   const trims: BoxData[] = [];
   const windows: BoxData[] = [];
-  const doorPanels: BoxData[] = [];
+  const doorPanels: DoorLeafData[] = [];
   const stairs: BoxData[] = [];
   const labels: LabelData[] = [];
   const furniture: FurnitureRender[] = [];
@@ -365,13 +406,17 @@ function computeScene(
       const isOpenAir = room.type === 'parking' || room.type === 'balcony';
       const catalog = ROOM_CATALOG[room.type];
 
-      // Per-room coloured floor slab (slightly desaturated for realism).
-      const baseColor = isOpenAir ? '#cfcfcf' : catalog?.color ?? '#e8e8e8';
-      const slabColor = desaturate(baseColor, 0.18);
+      // Per-room coloured floor slab — keep colors vivid (less desaturation) for
+      // a clean, vibrant architectural look. Slight lightening for brightness.
+      const baseColor = isOpenAir ? '#c8c8c8' : catalog?.color ?? '#e8e8e8';
+      const slabColor = lighten(desaturate(baseColor, 0.08), 0.05);
+      // Grout is a noticeably darker version of the slab colour.
+      const groutColor = desaturate(slabColor, 0.5);
       floorSlabs.push({
         position: [cx, baseY + FLOOR_SLAB_THICKNESS / 2, cz],
         size: [room.width, room.length],
         color: slabColor,
+        groutColor,
       });
 
       // Track footprints.
@@ -425,6 +470,7 @@ function computeScene(
         position: [(fMinX + fMaxX) / 2, slabY, (fMinZ + fMaxZ) / 2],
         size: [fMaxX - fMinX, fMaxZ - fMinZ],
         color: cfg.slabColor,
+        groutColor: cfg.slabColor,
       });
     }
   });
@@ -468,7 +514,8 @@ function computeScene(
 
 // -------------------------------------------------------------------------
 // Wall builder — emits thin shell segments around each room perimeter,
-// leaving gaps for doors. Windows are translucent cyan overlays.
+// leaving gaps for doors. Windows are translucent glass overlays. Doors
+// are hinged leaves rotated 30° ajar.
 // -------------------------------------------------------------------------
 
 function addRoomWalls(
@@ -480,7 +527,7 @@ function addRoomWalls(
   walls: BoxData[],
   trims: BoxData[],
   windows: BoxData[],
-  doorPanels: BoxData[],
+  doorPanels: DoorLeafData[],
   cfg: StyleConfig,
 ) {
   const wallCenterY = baseY + wallHeight / 2;
@@ -568,7 +615,7 @@ interface AxisWallArgs {
   walls: BoxData[];
   trims: BoxData[];
   windows: BoxData[];
-  doorPanels: BoxData[];
+  doorPanels: DoorLeafData[];
   cfg: StyleConfig;
 }
 
@@ -612,7 +659,7 @@ function buildAxisWall(a: AxisWallArgs) {
     }
   }
 
-  // Windows — translucent cyan overlays on the wall surface.
+  // Windows — glossy translucent cyan glass overlays on the wall surface.
   for (const win of a.wins) {
     const wWidth = Math.min(win.width * a.cfg.windowScale, a.length * 0.7);
     const center = a.startCoord + win.pos * a.length;
@@ -631,19 +678,30 @@ function buildAxisWall(a: AxisWallArgs) {
     }
   }
 
-  // Door panels — thin leaf at the door position.
+  // Doors — hinged leaves rotated 30° ajar.
+  // Hinge sits at one edge of the door opening (on the wall line); the panel
+  // is offset by half its width along local +X (X-wall) or +Z (Z-wall) so it
+  // pivots around the hinge when the group is rotated around Y.
   for (const d of a.doors) {
     const center = a.startCoord + d.pos * a.length;
-    const panelThick = WALL_THICKNESS * 0.55;
+    const leafW = d.width * 0.92;
     if (isX) {
+      // Wall runs along X. Hinge at (center - leafW/2, *, fixedCoord).
+      const hingeX = center - leafW / 2;
       a.doorPanels.push({
-        position: [center, a.baseY + DOOR_HEIGHT / 2, a.fixedCoord],
-        size: [d.width * 0.92, DOOR_HEIGHT, panelThick],
+        hinge: [hingeX, a.baseY, a.fixedCoord],
+        panelSize: [leafW, DOOR_HEIGHT, DOOR_THICKNESS],
+        panelOffset: [leafW / 2, DOOR_HEIGHT / 2, 0],
+        rotationY: -DOOR_OPEN_ANGLE,
       });
     } else {
+      // Wall runs along Z. Hinge at (fixedCoord, *, center - leafW/2).
+      const hingeZ = center - leafW / 2;
       a.doorPanels.push({
-        position: [a.fixedCoord, a.baseY + DOOR_HEIGHT / 2, center],
-        size: [panelThick, DOOR_HEIGHT, d.width * 0.92],
+        hinge: [a.fixedCoord, a.baseY, hingeZ],
+        panelSize: [DOOR_THICKNESS, DOOR_HEIGHT, leafW],
+        panelOffset: [0, DOOR_HEIGHT / 2, leafW / 2],
+        rotationY: DOOR_OPEN_ANGLE,
       });
     }
   }
@@ -676,7 +734,8 @@ function addStairs(
 }
 
 // =========================================================================
-// React components — Roof, PlotOutline, NorthArrow, RoomLabel, CameraRig
+// React components — Roof, PlotOutline, NorthArrow, RoomLabel, DoorLeaf,
+//                     CameraRig
 // =========================================================================
 
 interface RoofProps {
@@ -746,21 +805,24 @@ function Roof({
         metalness={0.1}
         transparent
         opacity={cfg.roofOpacity}
+        depthWrite={false}
       />
     </mesh>
   );
 }
 
 // -------------------------------------------------------------------------
-// Plot outline — thin wireframe on the ground showing the plot boundary.
+// Plot outline — thin accent-coloured wireframe on the ground.
 // -------------------------------------------------------------------------
 
 function PlotOutline({
   plotW,
   plotL,
+  accentColor,
 }: {
   plotW: number;
   plotL: number;
+  accentColor: string;
 }): React.JSX.Element {
   const edges = useMemo(() => {
     const geo = new THREE.PlaneGeometry(plotW, plotL);
@@ -769,13 +831,13 @@ function PlotOutline({
   }, [plotW, plotL]);
   return (
     <lineSegments geometry={edges} position={[0, 0.02, 0]}>
-      <lineBasicMaterial color="#475569" />
+      <lineBasicMaterial color={accentColor} linewidth={2} />
     </lineSegments>
   );
 }
 
 // -------------------------------------------------------------------------
-// North arrow — disc + cone + "N" text at the plot corner.
+// North arrow — clean white disc + red cone + "N" text at the plot corner.
 // -------------------------------------------------------------------------
 
 function NorthArrow({
@@ -820,7 +882,31 @@ function NorthArrow({
 }
 
 // -------------------------------------------------------------------------
-// Room label — floating HTML pill above each room centre.
+// DoorLeaf — a hinged panel rotated 30° ajar.
+// -------------------------------------------------------------------------
+
+function DoorLeaf({ data }: { data: DoorLeafData }): React.JSX.Element {
+  return (
+    <group position={data.hinge} rotation={[0, data.rotationY, 0]}>
+      <mesh
+        position={data.panelOffset}
+        castShadow
+        receiveShadow
+      >
+        <boxGeometry args={data.panelSize} />
+        <meshStandardMaterial
+          color="#8a6a4a"
+          roughness={0.6}
+          metalness={0}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+// -------------------------------------------------------------------------
+// Room label — clean floating white pill with an accent left border.
+// Bold room name + muted mono dimensions subtext.
 // -------------------------------------------------------------------------
 
 function RoomLabel({ label }: { label: LabelData }): React.JSX.Element {
@@ -828,33 +914,36 @@ function RoomLabel({ label }: { label: LabelData }): React.JSX.Element {
     <Html
       position={label.position}
       center
-      distanceFactor={18}
+      distanceFactor={20}
       zIndexRange={[10, 0]}
+      pointerEvents="none"
       occlude={false}
     >
       <div
         style={{
-          background: 'rgba(255,255,255,0.95)',
-          padding: '4px 10px',
-          borderRadius: 12,
-          border: `1.5px solid ${label.color}`,
-          color: '#1e3a5f',
-          fontSize: 11,
-          fontWeight: 700,
+          background: 'rgba(255,255,255,0.96)',
+          padding: '5px 12px 5px 10px',
+          borderRadius: 8,
+          borderLeft: `4px solid ${label.color}`,
+          boxShadow: '0 6px 18px rgba(15,23,42,0.18)',
+          color: '#1e293b',
           fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif',
           whiteSpace: 'nowrap',
-          boxShadow: '0 4px 14px rgba(15,23,42,0.18)',
-          textAlign: 'center',
           pointerEvents: 'none',
           userSelect: 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-start',
+          lineHeight: 1.15,
         }}
       >
-        <div>{label.text}</div>
+        <div style={{ fontSize: 12, fontWeight: 700 }}>{label.text}</div>
         <div
           style={{
-            fontSize: 9,
-            color: '#6b7280',
+            fontSize: 10,
             fontWeight: 500,
+            color: '#64748b',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             marginTop: 1,
           }}
         >
@@ -895,27 +984,27 @@ function CameraRig({
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as unknown as ControlsLike | null;
 
-  // Compute target position + lookAt whenever cameraView changes.
+  // Compute target position + lookAt whenever cameraView changes (per spec).
   useEffect(() => {
     let pos: [number, number, number];
     let look: [number, number, number];
     switch (cameraView) {
       case 'isometric':
-        pos = [plotW * 0.7, plotW * 0.8, plotW * 0.7];
-        look = [0, 4, 0];
+        pos = [plotW * 0.6, plotW * 0.75, plotW * 0.6];
+        look = [0, 5, 0];
         break;
       case 'front':
-        pos = [0, 6, plotL * 1.1];
+        pos = [0, 7, plotL * 1.15];
         look = [0, 5, 0];
         break;
       case 'top':
-        pos = [0, plotL * 1.5, 0.01];
+        pos = [0.01, plotL * 1.6, 0.01];
         look = [0, 0, 0];
         break;
       case 'orbit':
       default:
-        pos = [plotW * 0.8, plotL * 0.7, plotW * 0.9];
-        look = [0, 4, 0];
+        pos = [plotW * 0.75, plotW * 0.65, plotW * 0.85];
+        look = [0, 5, 0];
         break;
     }
     cameraTargetRef.current.set(pos[0], pos[1], pos[2]);
@@ -951,7 +1040,8 @@ function CameraRig({
 }
 
 // =========================================================================
-// Scene — assembles lights, environment, ground, building, labels, controls
+// Scene — assembles sky, lights, environment, ground, building, labels,
+// controls. This is the heart of the "clean, bright, professional" look.
 // =========================================================================
 
 function Scene(props: Viewer3DProps): React.JSX.Element {
@@ -985,89 +1075,137 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
 
   const contactShadowScale = Math.max(plotW, plotL, 20) + 20;
 
+  // Single-floor cutaway → walls are semi-transparent so furniture is
+  // clearly visible inside. Multi-floor mode → solid exterior walls.
+  const wallOpacity = showAllFloors ? 1 : 0.35;
+  const wallTransparent = wallOpacity < 1;
+
   return (
     <>
-      {/* Sky + atmospheric fog */}
-      <color attach="background" args={['#e8eef5']} />
-      <fog attach="fog" args={['#e8eef5', 70, 240]} />
+      {/* Soft sky-blue background as a fallback / atmospheric base.
+          The <Sky> component paints a real atmospheric gradient on top. */}
+      <color attach="background" args={['#eaf2fa']} />
+      <fog attach="fog" args={['#eaf2fa', 90, 320]} />
 
-      {/* Lighting — soft and architectural */}
-      <ambientLight intensity={0.5} />
-      <hemisphereLight args={['#ffffff', '#b0b8c0', 0.6]} />
+      {/* Real atmospheric sky — soft gradient + sun glow. Wrapped in Suspense
+          so the rest of the scene can paint immediately. */}
+      <Suspense fallback={null}>
+        <Sky
+          distance={450000}
+          sunPosition={[25, 35, 18]}
+          inclination={0.5}
+          azimuth={0.25}
+          turbidity={6}
+          rayleigh={1.2}
+          mieCoefficient={0.005}
+          mieDirectionalG={0.8}
+        />
+      </Suspense>
+
+      {/* Lighting rig — BRIGHT and CLEAN.
+          Ambient kills dullness; hemisphere adds sky/ground bounce;
+          key directional sun casts crisp shadows; fill softens the dark side. */}
+      <ambientLight intensity={0.8} />
+      <hemisphereLight args={['#ffffff', '#d8dde6', 0.7]} />
       <directionalLight
-        position={[20, 30, 15]}
-        intensity={1.2}
+        position={[25, 35, 18]}
+        intensity={1.5}
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-40}
-        shadow-camera-right={40}
-        shadow-camera-top={40}
-        shadow-camera-bottom={-40}
+        shadow-camera-left={-50}
+        shadow-camera-right={50}
+        shadow-camera-top={50}
+        shadow-camera-bottom={-50}
         shadow-camera-near={0.5}
-        shadow-camera-far={100}
+        shadow-camera-far={120}
         shadow-bias={-0.0001}
       />
-      {/* Soft fill from the opposite side (no shadow) */}
-      <directionalLight position={[-15, 20, -10]} intensity={0.3} />
+      {/* Soft fill from the opposite side (no shadow) — kills flat dark sides. */}
+      <directionalLight position={[-20, 25, -12]} intensity={0.5} />
 
-      {/* Image-based lighting for realistic material reflections */}
+      {/* Image-based lighting for realistic reflections on walls, floors,
+          windows, furniture. Wrapped in Suspense so it loads async. */}
       <Suspense fallback={null}>
-        <Environment preset="apartment" />
+        <Environment preset="city" />
       </Suspense>
 
       {/* Animated camera rig */}
       <CameraRig cameraView={cameraView} plotW={plotW} plotL={plotL} />
 
-      {/* Ground plane */}
+      {/* Ground plane — clean light concrete, 300×300. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[200, 200]} />
-        <meshStandardMaterial color="#c8cdd4" roughness={0.9} metalness={0} />
+        <planeGeometry args={[300, 300]} />
+        <meshStandardMaterial color="#d4d8de" roughness={0.95} metalness={0} />
       </mesh>
 
-      {/* Subtle infinite grid */}
+      {/* Subtle infinite grid — clean technical reference. */}
       <Grid
-        args={[200, 200]}
+        args={[300, 300]}
         cellSize={2}
-        cellThickness={0.6}
-        cellColor="#a8aeb6"
+        cellThickness={0.5}
+        cellColor="#c8ccd4"
         sectionSize={10}
         sectionThickness={1}
-        sectionColor="#6b7280"
-        fadeDistance={80}
+        sectionColor="#a0a8b4"
+        fadeDistance={120}
         fadeStrength={1}
         infiniteGrid
         position={[0, 0.005, 0]}
       />
 
-      {/* Soft ambient-occlusion grounding shadow */}
+      {/* Soft ambient-occlusion grounding shadow under the building. */}
       <ContactShadows
         position={[0, 0.01, 0]}
         scale={contactShadowScale}
-        blur={2}
-        far={20}
-        opacity={0.5}
+        blur={2.2}
+        far={24}
+        opacity={0.55}
         resolution={1024}
       />
 
-      {/* Plot boundary wireframe */}
-      <PlotOutline plotW={plotW} plotL={plotL} />
+      {/* Accent-coloured plot boundary wireframe */}
+      <PlotOutline plotW={plotW} plotL={plotL} accentColor={accentColor} />
 
       {/* Building */}
       <group>
-        {/* Per-room floor slabs */}
+        {/* Per-room polished-tile floor slabs with grout borders */}
         {scene.floorSlabs.map((s, i) => (
-          <mesh
-            key={`fs-${i}`}
-            position={s.position}
-            receiveShadow
-          >
-            <boxGeometry args={[s.size[0], FLOOR_SLAB_THICKNESS, s.size[1]]} />
-            <meshStandardMaterial
-              color={s.color}
-              roughness={0.6}
-              metalness={0}
-            />
-          </mesh>
+          <group key={`fs-${i}`}>
+            {/* Grout underlay — slightly larger than the slab, peeking out
+                around the edge as a thin dark border. */}
+            <mesh
+              position={[
+                s.position[0],
+                s.position[1] - FLOOR_SLAB_THICKNESS / 2 + GROUT_THICKNESS / 2,
+                s.position[2],
+              ]}
+              receiveShadow
+            >
+              <boxGeometry
+                args={[
+                  s.size[0] + GROUT_INSET * 2,
+                  GROUT_THICKNESS,
+                  s.size[1] + GROUT_INSET * 2,
+                ]}
+              />
+              <meshStandardMaterial
+                color={s.groutColor}
+                roughness={0.9}
+                metalness={0}
+              />
+            </mesh>
+            {/* Polished tile slab — glossy to catch light and look clean. */}
+            <mesh position={s.position} receiveShadow>
+              <boxGeometry
+                args={[s.size[0], FLOOR_SLAB_THICKNESS, s.size[1]]}
+              />
+              <meshStandardMaterial
+                color={s.color}
+                roughness={0.3}
+                metalness={0.1}
+              />
+            </mesh>
+          </group>
         ))}
 
         {/* Inter-floor ceiling slabs (multi-floor only) */}
@@ -1082,12 +1220,8 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
           </mesh>
         ))}
 
-        {/* Walls */}
-        {scene.walls.map((w, i) => {
-          // In single-floor cutaway view, make walls semi-transparent so furniture is visible.
-          // In showAllFloors mode, walls are solid (realistic exterior).
-          const wallOpacity = showAllFloors ? 1 : 0.25;
-          return (
+        {/* Walls — clean white-with-warmth, semi-transparent in cutaway. */}
+        {scene.walls.map((w, i) => (
           <mesh
             key={`w-${i}`}
             position={w.position}
@@ -1099,13 +1233,12 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
               color={cfg.wallColor}
               roughness={cfg.wallRoughness}
               metalness={0}
-              transparent={wallOpacity < 1}
+              transparent={wallTransparent}
               opacity={wallOpacity}
-              depthWrite={wallOpacity === 1}
+              depthWrite={!wallTransparent}
             />
           </mesh>
-          );
-        })}
+        ))}
 
         {/* Accent trims */}
         {scene.trims.map((w, i) => (
@@ -1119,26 +1252,24 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
           </mesh>
         ))}
 
-        {/* Windows — translucent cyan glass */}
+        {/* Windows — glossy translucent cyan glass */}
         {scene.windows.map((w, i) => (
           <mesh key={`win-${i}`} position={w.position}>
             <boxGeometry args={w.size} />
             <meshStandardMaterial
-              color="#7ec8ff"
+              color="#a8d8f5"
               transparent
-              opacity={0.3}
-              roughness={0.1}
-              metalness={0}
+              opacity={0.35}
+              roughness={0.05}
+              metalness={0.2}
+              depthWrite={false}
             />
           </mesh>
         ))}
 
-        {/* Door panels */}
-        {scene.doorPanels.map((w, i) => (
-          <mesh key={`dp-${i}`} position={w.position} castShadow>
-            <boxGeometry args={w.size} />
-            <meshStandardMaterial color="#8a6a4a" roughness={0.7} metalness={0} />
-          </mesh>
+        {/* Doors — hinged leaves, slightly ajar */}
+        {scene.doorPanels.map((d, i) => (
+          <DoorLeaf key={`dp-${i}`} data={d} />
         ))}
 
         {/* Stairs */}
@@ -1158,7 +1289,8 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
           </mesh>
         ))}
 
-        {/* Furniture — rendered through <FurnitureMesh3D> */}
+        {/* Furniture — rendered through <FurnitureMesh3D>.
+            Cars and bikes are included automatically via the furniture list. */}
         {showFurniture &&
           scene.furniture.map((f, i) => (
             <group
@@ -1202,9 +1334,9 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
         makeDefault
         enableDamping
         dampingFactor={0.08}
-        minDistance={5}
-        maxDistance={150}
-        maxPolarAngle={Math.PI / 2 - 0.05}
+        minDistance={8}
+        maxDistance={180}
+        maxPolarAngle={Math.PI / 2 - 0.02}
         target={[0, 5, 0]}
       />
     </>

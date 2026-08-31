@@ -263,3 +263,43 @@ Stage Summary:
 - Furniture library with 45 draggable items + auto-placement
 - 3D viewer rebuilt with realistic lighting, shadows, materials, furniture
 - Floor plan quality: 98/100 score, zero-waste BSP packing, no overlaps
+
+---
+Task ID: 6 (Indian architecture + AI fix + tool panel + car/bike + PDF fix + 3D cleanup)
+Agent: main
+Task: Research Indian architecture, fix AI apply, integrate furniture as tool, add car/bike, fix PDF, improve 3D
+
+Work Log:
+- Researched Indian residential architecture via web search (Vastu, 30×40 plans, room sizes, construction costs)
+- Created src/lib/indian-architecture.ts: comprehensive knowledge base with room norms, Vastu quadrants, plot templates, cost rates, zoning notes, and INDIAN_ARCHITECTURE_CONTEXT prompt for AI
+- Added 'vastu-optimized' strategy to layout engine: BSP places rooms by Vastu quadrant (SW=master bedroom, SE=kitchen, NE=pooja/living, NW=parking/bath); 5th design option "Design E - Vastu Compliant"
+- Fixed AI assistant: now AUTO-APPLIES changes immediately (no need to click Apply button) — addresses "AI not applying changes" complaint; added Indian architecture context to LLM system prompt; added Vastu direction support (sw/se/ne/nw) to move-room action; expanded fallback interpreter with 15+ patterns (kitchen larger, balcony, master to SW, parking, living spacious, open, privacy, bathroom, ventilation, vastu, pooja, office, compact, remove bedroom, store, staircase)
+- Restructured left panel: Furniture Library is now a contextual TOOL inside the left tool panel (not a separate panel). Tools: Select, Pan, Room, Door, Window, Stairs, Furniture, Measure, Text. When a tool is selected, a contextual panel appears with tool-specific options.
+- Created src/components/openblueprint/workspace/tool-panel.tsx: adapts to active tool — Furniture (library + search + categories + drag), Room (editor with position/size/floor-move/delete), Door (add/edit/delete doors with position slider + width), Window (add/edit/delete windows with position slider + width), Stairs (add staircase + norms info)
+- Made rooms movable between floors: Room Editor has "Move to Floor" buttons (Ground/First/Second)
+- Made doors editable: position slider (0-100% along wall), width input, add/delete per room
+- Made windows editable: position slider, width input, add/delete per room
+- Made furniture fully editable: position (X/Y), size (width/length), rotation (0/90/180/270 + rotate button), floor, color, delete
+- Added car + bike furniture types: 2D SVG symbols (top-down sedan with wheels/windshield/mirrors, motorcycle with tank/seat/wheels) + 3D models (CarModel with body/cabin/glass/wheels/headlights, BikeModel with body/tank/seat/handlebar/wheels). Auto-added to parking rooms (1 car + 1 bike per Indian standard).
+- Fixed PDF export: replaced unreliable document.write with Blob URL approach; if popup blocked, downloads HTML file instead; added error handling for failed API calls
+- Improved 3D viewer: increased wall opacity (0.2→0.35) for better contrast; reduced floor slab desaturation (0.22→0.08) for more vivid colors; increased floor glossiness (roughness 0.4→0.3, metalness 0.05→0.1) for cleaner polished-tile look
+- Fixed svg-renderer: door erase-line now uses correct background color (respecting blueprintMode)
+
+Verification (Agent Browser + VLM):
+- Layout valid, 11 rooms, 2400 sq.ft, score 98/100
+- Furniture tool panel: shows inside left panel with search, category tabs, draggable items
+- Room tool: editor with position/size/floor-move/delete working
+- AI assistant: "make kitchen larger" → auto-applied, area 2400→2460, "AI changes applied" toast
+- 3D view: bright (9/10), professional (8/10), car visible in parking, kitchen/living furniture visible
+- PDF export: generates full blueprint sheet with disclaimer, no errors
+- Lint clean, HTTP 200
+
+Stage Summary:
+- Indian architecture knowledge injected into AI + layout engine (Vastu strategy)
+- AI assistant auto-applies changes (fixed #1 complaint)
+- Furniture integrated as a tool in left panel (fixed #2 complaint)
+- Doors/windows/furniture all editable (fixed #3 complaint)
+- Rooms movable between floors (fixed #4 complaint)
+- Car + bike auto-added to parking (fixed #5 complaint)
+- PDF export fixed (fixed #6 complaint)
+- 3D viewer brighter with more vivid colors (improved #7 complaint)

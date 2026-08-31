@@ -105,6 +105,26 @@ function shuffleByStrategy(items: RoomRequirement[], strategy: LayoutStrategy): 
       return aPub - bPub;
     });
   }
+  if (strategy === 'vastu-optimized') {
+    // Order rooms by Vastu-preferred placement so BSP puts them in the right quadrant.
+    // SW (master bedroom, staircase) → SE (kitchen) → NE (pooja, living, entrance) → NW (parking, bathroom) → others
+    const vastuOrder: Record<string, number> = {
+      bedroom: 0, // SW (master first)
+      staircase: 1, // S/W/SW
+      kitchen: 2, // SE
+      pooja: 3, // NE
+      living: 4, // NE/N
+      foyer: 5, // E/N
+      dining: 6, // E
+      parking: 7, // NW/SE
+      bathroom: 8, // NW/W
+      utility: 9, // NW
+      store: 10, // S/W
+      office: 11, // W/SW
+      balcony: 12, // N/E/NE
+    };
+    arr.sort((a, b) => (vastuOrder[a.type] ?? 99) - (vastuOrder[b.type] ?? 99));
+  }
   return arr;
 }
 
@@ -275,6 +295,7 @@ const STRATEGIES: { strategy: LayoutStrategy; name: string; tagline: string }[] 
   { strategy: 'ventilation-optimized', name: 'Design B', tagline: 'Ventilation Optimized' },
   { strategy: 'modern-open', name: 'Design C', tagline: 'Modern Open Layout' },
   { strategy: 'privacy-optimized', name: 'Design D', tagline: 'Privacy Optimized' },
+  { strategy: 'vastu-optimized', name: 'Design E', tagline: 'Vastu Compliant' },
 ];
 
 function ensureStaircase(reqs: RoomRequirement[], floors: number): RoomRequirement[] {
@@ -474,6 +495,30 @@ function bspPack(rect: Rect, rooms: RoomRequirement[], strategy: LayoutStrategy)
       secondRooms = leftRooms;
     }
   }
+  if (strategy === 'vastu-optimized') {
+    // For Vastu: SW (master bedroom) goes to top-right; NE (pooja, living) to bottom-left.
+    // In our coords (origin top-left, y-down): top = high-y (south), right = high-x (east).
+    // So SW = top-right, SE = top-left, NE = bottom-left, NW = bottom-right.
+    // Count "SW-preferring" rooms (bedroom, staircase, office) in each group.
+    const swTypes = new Set(['bedroom', 'staircase', 'office', 'store']);
+    const swInFirst = leftRooms.filter((r) => swTypes.has(r.type)).length;
+    const swInSecond = rightRooms.filter((r) => swTypes.has(r.type)).length;
+    // firstRooms go to the LEFT rect. For vertical split, left=west. For horizontal, left=top.
+    // We want SW-preferring rooms on the top (south) side.
+    if (splitVertical) {
+      // vertical split: leftRect=west, rightRect=east. SW needs east → put sw-preferring rooms in right (second).
+      if (swInFirst > swInSecond) {
+        firstRooms = rightRooms;
+        secondRooms = leftRooms;
+      }
+    } else {
+      // horizontal split: leftRect=top(south), rightRect=bottom(north). SW needs top → put sw-preferring in first.
+      if (swInSecond > swInFirst) {
+        firstRooms = rightRooms;
+        secondRooms = leftRooms;
+      }
+    }
+  }
 
   return [...bspPack(leftRect, firstRooms, strategy), ...bspPack(rightRect, secondRooms, strategy)];
 }
@@ -621,7 +666,17 @@ function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem
         break;
       }
       case 'parking': {
-        // no furniture
+        // Add a car + a bike to parking rooms (Indian standard: 1 car + 1 bike per dwelling)
+        const carW = Math.min(6, room.width - 2);
+        const carL = Math.min(10, room.length - 2);
+        items.push(mkFurniture('car', room.x + 1, room.y + (room.length - carL) / 2, carW, carL, room.floor, 0));
+        // bike in the remaining space
+        const bikeW = 2.5;
+        const bikeL = 6;
+        const bikeX = room.x + 1 + carW + 1;
+        if (bikeX + bikeW < room.x + room.width - 0.5) {
+          items.push(mkFurniture('bike', bikeX, room.y + (room.length - bikeL) / 2, bikeW, bikeL, room.floor, 0));
+        }
         break;
       }
       case 'staircase': {

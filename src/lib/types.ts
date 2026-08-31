@@ -46,7 +46,8 @@ export type FurnitureType =
   | 'rug' | 'lamp-floor' | 'pooja-altar'
   | 'dining-set-4' | 'dining-set-6'
   | 'reception-desk' | 'meeting-table' | 'office-cabin'
-  | 'clothing-rack' | 'display-shelf' | 'service-counter';
+  | 'clothing-rack' | 'display-shelf' | 'service-counter'
+  | 'car' | 'bike';
 
 export interface FurnitureItem {
   id: string;
@@ -166,7 +167,8 @@ export type LayoutStrategy =
   | 'space-optimized'
   | 'ventilation-optimized'
   | 'modern-open'
-  | 'privacy-optimized';
+  | 'privacy-optimized'
+  | 'vastu-optimized';
 
 export interface LayoutScore {
   total: number; // 0..100
@@ -254,7 +256,7 @@ export interface AiAction {
   // deltas
   deltaW?: number;
   deltaL?: number;
-  targetLocation?: 'front' | 'rear' | 'side' | 'center' | 'open' | 'privacy' | 'ventilation' | 'compact' | 'space';
+  targetLocation?: 'front' | 'rear' | 'side' | 'center' | 'open' | 'privacy' | 'ventilation' | 'compact' | 'space' | 'sw' | 'se' | 'ne' | 'nw' | 'vastu';
   targetRoomType?: RoomType;
   newName?: string;
 }

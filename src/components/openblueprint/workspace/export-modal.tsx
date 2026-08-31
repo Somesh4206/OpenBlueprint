@@ -70,16 +70,26 @@ export function ExportModal({ open, onOpenChange, layout, config, projectName, f
         img.src = url;
       } else if (type === 'pdf') {
         const res = await fetch('/api/export/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layout, config, projectName, finish, materials, accentColor }) });
+        if (!res.ok) throw new Error('PDF generation failed');
         const data = await res.json();
-        const w = window.open('', '_blank');
+        if (!data.html) throw new Error('No HTML returned');
+        // Open the HTML in a new tab via Blob URL (more reliable than document.write)
+        const blob = new Blob([data.html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const w = window.open(url, '_blank');
         if (w) {
-          w.document.write(data.html);
-          w.document.close();
-          setTimeout(() => w.print(), 800);
-          showToast('PDF opened — use browser print to save');
+          // give the new tab time to render, then trigger print
+          setTimeout(() => {
+            try { w.focus(); w.print(); } catch {}
+          }, 1200);
+          showToast('PDF opened — use browser print to save as PDF');
         } else {
-          showToast('Allow popups to export PDF', 'err');
+          // popup blocked — download the HTML file instead
+          download(blob, `${slug(projectName)}-blueprint.html`);
+          showToast('Popup blocked — HTML downloaded. Open it and print to PDF.');
         }
+        // revoke after a delay
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
       }
     } catch {
       showToast('Export failed', 'err');

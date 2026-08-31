@@ -68,7 +68,7 @@ import { ROOM_CATALOG } from '@/lib/room-catalog';
 import { cn } from '@/lib/utils';
 import { BlueprintCanvas } from './blueprint-canvas';
 import { AiAssistant } from './ai-assistant';
-import { FurnitureLibrary } from './furniture-library';
+import { ToolPanel } from './tool-panel';
 import { ValidationPanel } from './panels';
 import { computeBuiltUpArea, estimateCost, formatINR } from '@/lib/cost/estimator';
 import { validateLayout } from '@/lib/layout/engine';
@@ -314,10 +314,23 @@ export function Workspace({ config, design, projectId }: Props) {
           </TooltipProvider>
         </aside>
 
-        {/* Furniture library (only in 2D mode) */}
-        {view2d && (
-          <div className="w-56 border-r border-border bg-card shrink-0 hidden md:flex flex-col">
-            <FurnitureLibrary />
+        {/* Contextual tool panel — appears when a tool with options is selected (2D only) */}
+        {view2d && (tool === 'furniture' || tool === 'door' || tool === 'window' || tool === 'stairs' || tool === 'room') && (
+          <div className="w-60 border-r border-border bg-card shrink-0 hidden md:flex flex-col h-full">
+            <ToolPanel
+              tool={tool}
+              selectedRoom={selectedRoom}
+              layout={layout}
+              currentFloor={currentFloor}
+              onAddFurniture={addFurniture}
+              onAddRoom={addRoom}
+              onUpdateRoom={updateRoom}
+              onDeleteRoom={deleteRoom}
+              onUpdateFurniture={updateFurniture}
+              selectedFurnitureId={selectedFurnitureId}
+              onDeleteFurniture={deleteFurniture}
+              onSelectRoom={(id) => { setSelectedRoom(id); }}
+            />
           </div>
         )}
 

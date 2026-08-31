@@ -64,8 +64,18 @@ export function AiAssistant({ layout, config, onApplyLayout }: Props) {
       });
       const data = await res.json();
       const response = data.response as AiAssistantResponse;
-      setPending(response);
       setMessages((m) => [...m, { role: 'assistant', content: response.explanation, response }]);
+      // AUTO-APPLY: immediately apply the changes to the layout so the user sees the result.
+      // Only apply if there are real actions (not just a note).
+      const hasRealAction = response.actions.some((a) => a.type !== 'note');
+      if (hasRealAction && response.appliedLayout) {
+        // small delay so the message renders first
+        setTimeout(() => {
+          onApplyLayout(response.appliedLayout!);
+        }, 300);
+      } else {
+        setPending(response);
+      }
     } catch {
       setMessages((m) => [...m, { role: 'assistant', content: 'Sorry, I could not process that right now. Please try again.' }]);
     } finally {

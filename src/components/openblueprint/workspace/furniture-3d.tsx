@@ -1016,7 +1016,80 @@ function buildFurnitureModel(
       return <OfficeCabinModel w={w} l={l} color={color} />;
     case 'clothing-rack':
       return <ClothingRackModel w={w} l={l} color={color} />;
+    case 'car':
+      return <CarModel w={w} l={l} color={color} />;
+    case 'bike':
+      return <BikeModel w={w} l={l} color={color} />;
     default:
       return <DefaultBoxModel w={w} l={l} color={color} />;
   }
+}
+
+// ---- Car (top-down, length along Z) ----
+function CarModel({ w, l, color }: ModelProps) {
+  const body = color;
+  const dark = '#1a1a1a';
+  const glass = '#9ec5ff';
+  return (
+    <group>
+      {/* Body */}
+      <Box size={[w, 1.8, l]} position={[0, 1, 0]} color={body} roughness={0.35} metalness={0.5} />
+      {/* Cabin (roof) */}
+      <Box size={[w * 0.8, 1.2, l * 0.45]} position={[0, 2.4, 0]} color={darkenHex(body, 0.15)} roughness={0.3} metalness={0.4} />
+      {/* Windshield front (south, +Z) */}
+      <Box size={[w * 0.78, 1.0, 0.1]} position={[0, 2.4, l * 0.225]} color={glass} opacity={0.55} roughness={0.05} metalness={0.1} />
+      {/* Windshield rear */}
+      <Box size={[w * 0.78, 1.0, 0.1]} position={[0, 2.4, -l * 0.225]} color={glass} opacity={0.55} roughness={0.05} metalness={0.1} />
+      {/* Side windows */}
+      <Box size={[0.08, 0.9, l * 0.42]} position={[w * 0.4, 2.4, 0]} color={glass} opacity={0.5} />
+      <Box size={[0.08, 0.9, l * 0.42]} position={[-w * 0.4, 2.4, 0]} color={glass} opacity={0.5} />
+      {/* Wheels (4) — rotated cylinders (axle along X) */}
+      {[
+        [w * 0.42, 0.5, l * 0.32],
+        [-w * 0.42, 0.5, l * 0.32],
+        [w * 0.42, 0.5, -l * 0.32],
+        [-w * 0.42, 0.5, -l * 0.32],
+      ].map((p, i) => (
+        <Cyl key={i} radiusTop={0.5} radiusBottom={0.5} height={0.4} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.8} />
+      ))}
+      {/* Headlights */}
+      <Box size={[w * 0.7, 0.3, 0.1]} position={[0, 1.2, l / 2]} color="#fff8d0" />
+      {/* Tail lights */}
+      <Box size={[w * 0.7, 0.3, 0.1]} position={[0, 1.2, -l / 2]} color="#5a1010" />
+    </group>
+  );
+}
+
+// ---- Bike (motorcycle, top-down, length along Z) ----
+function BikeModel({ w, l, color }: ModelProps) {
+  const dark = '#1a1a1a';
+  const seat = '#2a1a0a';
+  return (
+    <group>
+      {/* Main body */}
+      <Box size={[w * 0.5, 1.5, l * 0.7]} position={[0, 1.2, 0]} color={color} roughness={0.4} metalness={0.5} />
+      {/* Fuel tank */}
+      <Box size={[w * 0.45, 0.8, l * 0.25]} position={[0, 2.0, l * 0.05]} color={darkenHex(color, 0.2)} roughness={0.3} metalness={0.6} />
+      {/* Seat */}
+      <Box size={[w * 0.4, 0.4, l * 0.2]} position={[0, 1.9, -l * 0.2]} color={seat} roughness={0.7} />
+      {/* Handlebar */}
+      <Cyl radiusTop={0.08} radiusBottom={0.08} height={w * 0.7} position={[0, 2.2, l * 0.35]} rotation={[0, 0, Math.PI / 2]} color={dark} />
+      {/* Headlight */}
+      <Cyl radiusTop={0.25} radiusBottom={0.25} height={0.15} position={[0, 1.6, l / 2]} rotation={[Math.PI / 2, 0, 0]} color="#ffe08a" />
+      {/* Wheels (2) */}
+      <Cyl radiusTop={0.6} radiusBottom={0.6} height={0.2} position={[0, 0.6, l * 0.38]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.85} />
+      <Cyl radiusTop={0.6} radiusBottom={0.6} height={0.2} position={[0, 0.6, -l * 0.38]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.85} />
+    </group>
+  );
+}
+
+function darkenHex(hex: string, amount: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const dr = Math.round(r * (1 - amount));
+  const dg = Math.round(g * (1 - amount));
+  const db = Math.round(b * (1 - amount));
+  return '#' + [dr, dg, db].map((x) => x.toString(16).padStart(2, '0')).join('');
 }

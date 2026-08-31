@@ -328,6 +328,48 @@ export function FurnitureSymbol({
           <path d="M65 24 L65 48 L61 52 L69 52 L65 48 Z" fill={accent} stroke={stroke} strokeWidth="0.8" />
         </svg>
       );
+    case 'car':
+      return (
+        <svg viewBox="0 0 100 100" className={className} preserveAspectRatio="none">
+          {/* Car body — top-down sedan */}
+          <rect x="15" y="10" width="70" height="80" rx="14" fill={color} stroke={darken(color, 0.4)} strokeWidth="1.5" />
+          {/* Roof / cabin */}
+          <rect x="22" y="28" width="56" height="38" rx="6" fill={darken(color, 0.2)} stroke={darken(color, 0.5)} strokeWidth="1" />
+          {/* Windshield front */}
+          <path d="M22 28 L78 28 L72 22 L28 22 Z" fill="#9ec5ff" opacity="0.6" />
+          {/* Windshield rear */}
+          <path d="M22 66 L78 66 L72 72 L28 72 Z" fill="#9ec5ff" opacity="0.6" />
+          {/* Hood line */}
+          <line x1="22" y1="24" x2="78" y2="24" stroke={darken(color, 0.4)} strokeWidth="0.8" />
+          {/* Wheels */}
+          <rect x="8" y="22" width="8" height="14" rx="2" fill="#1a1a1a" />
+          <rect x="84" y="22" width="8" height="14" rx="2" fill="#1a1a1a" />
+          <rect x="8" y="64" width="8" height="14" rx="2" fill="#1a1a1a" />
+          <rect x="84" y="64" width="8" height="14" rx="2" fill="#1a1a1a" />
+          {/* Side mirrors */}
+          <rect x="20" y="30" width="4" height="3" fill={darken(color, 0.3)} />
+          <rect x="76" y="30" width="4" height="3" fill={darken(color, 0.3)} />
+        </svg>
+      );
+    case 'bike':
+      return (
+        <svg viewBox="0 0 100 100" className={className} preserveAspectRatio="none">
+          {/* Bike — top-down motorcycle */}
+          <rect x="35" y="10" width="30" height="80" rx="8" fill={color} stroke={darken(color, 0.4)} strokeWidth="1.5" />
+          {/* Seat */}
+          <rect x="38" y="14" width="24" height="10" rx="3" fill="#3a2a1a" />
+          {/* Fuel tank */}
+          <rect x="36" y="30" width="28" height="20" rx="5" fill={accent} stroke={darken(color, 0.4)} strokeWidth="0.8" />
+          {/* Engine */}
+          <rect x="40" y="52" width="20" height="14" rx="2" fill={darken(color, 0.3)} />
+          {/* Handlebar */}
+          <rect x="28" y="76" width="44" height="4" rx="2" fill="#2a2a2a" />
+          {/* Front wheel */}
+          <rect x="42" y="80" width="16" height="12" rx="2" fill="#1a1a1a" />
+          {/* Headlight */}
+          <circle cx="50" cy="84" r="3" fill="#ffe08a" stroke={darken(color, 0.4)} strokeWidth="0.5" />
+        </svg>
+      );
     default:
       return (
         <svg viewBox="0 0 100 100" className={className} preserveAspectRatio="none">
