@@ -9,8 +9,11 @@ import {
   MaterialSelection,
   DesignStyle,
   FinishGrade,
+  FurnitureItem,
+  FurnitureType,
 } from './types';
 import { TEMPLATES, templateToConfig } from './templates';
+import { FURNITURE_MAP } from './furniture-catalog';
 
 interface AppState {
   view: AppView;
@@ -29,6 +32,9 @@ interface AppState {
   currentDesign: ScoredLayout | null;
   currentLayout: LayoutData | null;
   selectedRoomId: string | null;
+  selectedFurnitureId: string | null;
+  furniturePanelOpen: boolean;
+  furnitureCategory: string;
   view2d: boolean;
   currentFloor: number;
   showAllFloors: boolean;
@@ -44,6 +50,9 @@ interface AppState {
   setCurrentDesign: (d: ScoredLayout) => void;
   setCurrentLayout: (l: LayoutData) => void;
   setSelectedRoom: (id: string | null) => void;
+  setSelectedFurniture: (id: string | null) => void;
+  setFurniturePanelOpen: (b: boolean) => void;
+  setFurnitureCategory: (c: string) => void;
   setView2d: (b: boolean) => void;
   setCurrentFloor: (f: number) => void;
   setShowAllFloors: (b: boolean) => void;
@@ -57,6 +66,9 @@ interface AppState {
   setCompareOpen: (b: boolean) => void;
   setDesigns: (d: ScoredLayout[]) => void;
   enterWorkspace: (d: ScoredLayout) => void;
+  addFurniture: (type: FurnitureType, x: number, y: number) => void;
+  updateFurniture: (id: string, patch: Partial<FurnitureItem>) => void;
+  deleteFurniture: (id: string) => void;
 }
 
 const defaultConfig: ProjectConfig = {
@@ -175,6 +187,9 @@ export const useApp = create<AppState>((set, get) => ({
   currentDesign: null,
   currentLayout: null,
   selectedRoomId: null,
+  selectedFurnitureId: null,
+  furniturePanelOpen: true,
+  furnitureCategory: 'living',
   view2d: true,
   currentFloor: 0,
   showAllFloors: false,
@@ -189,7 +204,10 @@ export const useApp = create<AppState>((set, get) => ({
 
   setCurrentDesign: (d) => set({ currentDesign: d, currentLayout: d.layout }),
   setCurrentLayout: (l) => set({ currentLayout: l }),
-  setSelectedRoom: (id) => set({ selectedRoomId: id }),
+  setSelectedRoom: (id) => set({ selectedRoomId: id, selectedFurnitureId: null }),
+  setSelectedFurniture: (id) => set({ selectedFurnitureId: id, selectedRoomId: null }),
+  setFurniturePanelOpen: (b) => set({ furniturePanelOpen: b }),
+  setFurnitureCategory: (c) => set({ furnitureCategory: c }),
   setView2d: (b) => set({ view2d: b }),
   setCurrentFloor: (f) => set({ currentFloor: f }),
   setShowAllFloors: (b) => set({ showAllFloors: b }),
@@ -207,8 +225,38 @@ export const useApp = create<AppState>((set, get) => ({
       currentLayout: d.layout,
       view: { name: 'workspace', projectId: null, config: get().wizardConfig, design: d },
       selectedRoomId: null,
+      selectedFurnitureId: null,
       view2d: true,
       currentFloor: 0,
       style: get().wizardConfig.style,
     }),
+  addFurniture: (type, x, y) => {
+    const layout = get().currentLayout;
+    if (!layout) return;
+    const cat = FURNITURE_MAP[type];
+    if (!cat) return;
+    const item: FurnitureItem = {
+      id: `f${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      type,
+      name: cat.name,
+      x: Math.round(x * 10) / 10,
+      y: Math.round(y * 10) / 10,
+      width: cat.width,
+      length: cat.length,
+      rotation: 0,
+      floor: get().currentFloor,
+      color: cat.color,
+    };
+    set({ currentLayout: { ...layout, furniture: [...layout.furniture, item] }, selectedFurnitureId: item.id, selectedRoomId: null });
+  },
+  updateFurniture: (id, patch) => {
+    const layout = get().currentLayout;
+    if (!layout) return;
+    set({ currentLayout: { ...layout, furniture: layout.furniture.map((f) => (f.id === id ? { ...f, ...patch } : f)) } });
+  },
+  deleteFurniture: (id) => {
+    const layout = get().currentLayout;
+    if (!layout) return;
+    set({ currentLayout: { ...layout, furniture: layout.furniture.filter((f) => f.id !== id) }, selectedFurnitureId: null });
+  },
 }));

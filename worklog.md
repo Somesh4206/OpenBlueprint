@@ -142,3 +142,124 @@ Stage Summary:
 - AI assistant + RAG knowledge both powered by z-ai-web-dev-sdk LLM with fallbacks
 - Responsive (mobile nav collapses), sticky footer, disclaimer present
 - Production-ready
+
+---
+Task ID: 5-a
+Agent: furniture-3d-builder
+Task: Build 3D furniture models library
+
+Work Log:
+- Read worklog.md (project history + viewer-3d conventions), src/lib/types.ts (FurnitureType union + FurnitureItem), and src/lib/furniture-catalog.ts (45 entries with default colors) to ground the model library in the real data model.
+- Skimmed viewer-3d.tsx (Task 8) to confirm the project's 3D conventions: 1 unit = 1 foot, origin at plot centre, +Y up, React 19 types => `React.JSX.Element` return, R3F v9 + drei v10 + three v0.185.
+- Created `src/components/openblueprint/workspace/furniture-3d.tsx` (~700 lines, single-file client component).
+- Defined primitive helpers — `Box`, `Cyl`, `Sph`, `Cone`, `HalfSphere` (dome via `sphereGeometry` with thetaLength=π/2), `Torus` — each wrapping a `<mesh>` with `castShadow`/`receiveShadow`, `meshStandardMaterial`, roughness/metalness tuned per material family (wood/fabric 0.7-0.95, metal 0.2-0.4 with metalness 0.6-0.8, glass 0.1 with opacity 0.2-0.85).
+- Added `darken()` / `lighten()` hex colour utilities so each model can derive secondary tones (headboard darker than mattress, cushions lighter than sofa frame, etc.) from the base `item.color`.
+- Built a dedicated model component for every FurnitureType in the catalog:
+  - Beds (single/double/king): frame + mattress + duvet line + headboard + 2 pillows, ~3.5ft headboard height.
+  - Sofas (2/3): seat base + 2 cushions + backrest + 2 armrests. L-sofa: two seat arms meeting at a corner with backrests along the two outer edges. Armchair: smaller single-seat variant.
+  - Dining chair: 4 cylinder legs + seat + backrest. Office chair: 5-star base (5 radiating cylinders via nested `<group rotation={[0, a*π/180, 0]}>` with horizontal cylinders rotated `Z=π/2`) + central post + seat + low backrest. Bar stool: post + round seat + torus foot ring + base foot.
+  - Round table: pedestal base + column + round top. Rect / coffee / dining-6 / meeting-table: 4 cylinder legs + flat top, height parameter (coffee 1.5ft, others 2.5ft).
+  - Desk: top + 3 legs + drawer pedestal with two drawer-line seams.
+  - Wardrobe: tall 7ft cabinet + centre door seam + side seams + 2 cylinder handles + 2 internal shelves. Bookshelf / shelf-wall: tall cabinet with 4 recessed horizontal shelves + centre vertical divider. Display-shelf: shorter variant with 3 shelves.
+  - TV unit: low 1.5ft cabinet with door seams. TV wall: stand base + neck + thin screen panel + glow overlay.
+  - Kitchen-counter / service-counter / reception-desk: long counter body + thinner overhanging top + dynamic door-line count based on width.
+  - Kitchen island: body + overhanging countertop + underside trim.
+  - Stove: body + dark top + 4 cylinder burners + 2 control knobs. Sink-kitchen: body + recessed basin + faucet (vertical post + horizontal spout cylinder). Fridge: 6ft body + freezer divider + vertical door seam + 2 handles.
+  - Toilet: tank box + ellipsoid bowl (sphere scaled) + seat ring (cylinder) + recessed inner. Bathtub: body + recessed water-coloured interior + faucet. Shower: base + curb + 2 transparent glass walls (opacity 0.2) + shower head. Vanity: cabinet + countertop + recessed basin + faucet + drawer line. Washer: body + round door (cylinder rotated X=π/2 to face +Z) + control panel.
+  - Plants (small/large): tapered cylinder pot + soil cap + clustered sphere foliage (large = 4 spheres, small = 3).
+  - Rug: very thin 0.05ft flat box with inner border, opacity 0.75. Floor lamp: cylinder base + thin post + cone shade. Pooja altar: cabinet + door panel + step + half-sphere dome + finial.
+  - Dining-set-4 / -6: composes a TableRectModel (dining height) + 4 or 6 ChairDiningModel instances arranged on the long sides of the table, each rotated to face inward.
+  - Office-cabin: composes DeskModel + ChairOfficeModel + partition wall behind desk + ShelfModel on the side.
+  - Clothing-rack: 2 vertical posts + horizontal cylinder bar + 2 base feet + 3 hanging garment boxes with hangers.
+  - Default fallback: a single short box for any unknown type.
+- The single public `FurnitureMesh3D` component: reads `item.color || '#9aa0a6'`, clamps width/length to ≥0.5, calls `useMemo(() => buildFurnitureModel(type, w, l, color), [type, w, l, color])` to build the model subtree once per prop change, and wraps it in `<group position={[worldX, 0, worldZ]} rotation={[0, item.rotation*π/180, 0]}>`. Exported both as named `FurnitureMesh3D` and as the default export.
+- Verified: `bunx tsc --noEmit` (0 errors anywhere outside examples/skills/mini-plan noise; specifically `grep "furniture-3d"` returns nothing), `bun run lint` (exit 0, clean), `tail dev.log` (server still 200ing, no compile regressions).
+- Wrote agent-ctx record at `/home/z/my-project/agent-ctx/5-a-furniture-3d-builder.md`.
+
+Stage Summary:
+- Files created: `src/components/openblueprint/workspace/furniture-3d.tsx` (~700 lines, self-contained, no new deps).
+- Component API: `FurnitureMesh3D({ item, worldX, worldZ })` — named + default export. Parent (viewer-3d.tsx) is expected to pre-convert item.x/item.y to plot-centred 3D worldX/worldZ and pass them in.
+- All 45 FurnitureType values covered with a dedicated, recognizable primitive-based model. Unknown types fall back to a simple box.
+- Coordinate convention matches viewer-3d.tsx: 1 unit = 1 ft, model built in local space (centre on origin, sitting on floor at y=0), parent group applies world position + Y rotation.
+- All meshes use `meshStandardMaterial` with castShadow/receiveShadow; roughness tuned per material (wood/fabric 0.7-0.95, metal 0.2-0.4 with metalness, glass opacity 0.2-0.85). `item.color` drives the base material colour, with darken/lighten helpers generating derived tones.
+- Geometry is memoized via `useMemo` on the model subtree keyed by `[type, width, length, color]` so re-renders driven by parent camera/controls don't rebuild the tree.
+- Ready for the viewer-3d.tsx upgrade (Task 5-b+) to swap the existing single-box furniture proxies for `<FurnitureMesh3D>` per item.
+
+---
+Task ID: 5-b
+Agent: 3d-viewer-rebuilder
+Task: Rebuild 3D viewer with realistic materials, lighting, and furniture integration
+
+Work Log:
+- Read worklog.md (project history), the existing Task-8 viewer-3d.tsx, the new Task-5-a furniture-3d.tsx, src/lib/types.ts, and src/lib/room-catalog.ts to ground the rewrite in the real data model (LayoutData.furniture, RoomRect.doors/windows, PlotConfig.northDirection, R3F v9 + drei v10 + three v0.185, React 19 React.JSX.Element).
+- Confirmed parent workspace.tsx:78 imports the viewer via `dynamic(() => import('./viewer-3d').then(m => m.Viewer3D), { ssr:false })` and passes the documented props — so the public signature MUST stay identical.
+- Completely rewrote src/components/openblueprint/workspace/viewer-3d.tsx (~960 lines, single-file client component, named + default export).
+- Premium scene setup: `<Canvas shadows dpr={[1,2]} gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.1, preserveDrawingBuffer: true }} camera={{ position, fov: 45, near: 0.1, far: 1000 }}>`; soft sky `<color args={['#e8eef5']>` + `<fog args={['#e8eef5', 70, 240]}>`.
+- Lighting: ambientLight(0.5) + hemisphereLight(sky #fff / ground #b0b8c0 / 0.6) + key directionalLight at [20,30,15] intensity 1.2 with 2048² shadow map sized ±40 / near 0.5 / far 100 / bias -0.0001, plus fill directionalLight at [-15,20,-10] intensity 0.3 (no shadow) to soften the dark side.
+- drei `<Environment preset="apartment">` wrapped in its own `<Suspense fallback={null}>` for image-based lighting reflections (single biggest visual upgrade).
+- Ground: 200×200 plane (#c8cdd4, roughness 0.9) + drei `<Grid cellSize=2 sectionSize=10 fadeDistance=80 infiniteGrid>` + drei `<ContactShadows scale=max(plotW,plotL)+20 blur=2 far=20 opacity=0.5 resolution=1024>` for soft ambient-occlusion grounding.
+- Walls: kept the proven splitWallByOpenings thin-shell builder but bumped WALL_THICKNESS 0.3 → 0.5 ft so walls have real thickness. Walls are boxes around each room perimeter with door gaps. Per-style wall colour/roughness/height exactly per spec (modern #eceae4/9ft, minimal #f2f0ec/8.5ft, traditional #d9cdb8/9.5ft pitched, contemporary #e4e0d8/10ft overhang, luxury #efeae0/10.5ft).
+- Floor slabs: thin (0.05ft) per-room coloured slabs using ROOM_CATALOG[type].color run through a desaturate(hex, 0.18) helper for muted realism. Roughness 0.6, metalness 0.
+- Windows: thin translucent cyan boxes (#7ec8ff, opacity 0.3, roughness 0.1, metalness 0), height 4ft, sill at 3ft — per spec.
+- Doors: gap (via splitWallByOpenings) + thin warm-brown door panel leaf.
+- Stairs: 7 ascending step boxes for staircase rooms.
+- Roof: only when showAllFloors. Flat (modern/minimal/luxury) and overhang (contemporary) render as semi-transparent accent-coloured slabs (opacity per style). Pitched (traditional) renders as a triangular-prism ExtrudeGeometry in warm #7d4f2a. Roof footprint = union of all rendered rooms' bounds + style overhang. No roof in single-floor view (cutaway).
+- Multi-floor stacking: each rendered floor at idx * FLOOR_HEIGHT (10ft), thin inter-floor ceiling slab between consecutive floors, roof on top.
+- Furniture: imported FurnitureMesh3D from './furniture-3d'. For every layout.furniture item whose floor is in the rendered set, computed worldX = item.x + item.width/2 - plotW/2, worldZ = item.y + item.length/2 - plotL/2, worldY = floorBaseY + slab thickness, and rendered <group position={[0, worldY, 0]}><FurnitureMesh3D item={item} worldX={...} worldZ={...} /></group>. FurnitureMesh3D handles its own local rotation.
+- Room labels: drei <Html center distanceFactor={18}> floating pills — white bg, navy text, room-type accent border, name + "W × L ft" subtext. Positioned at room centre + wall height + 0.6ft. Only when showLabels.
+- CameraRig: lerps camera.position toward a target vector and controls.target toward a lookAt vector on each cameraView change. Four presets exactly per spec (orbit [plotW*0.8, plotL*0.7, plotW*0.9] lookAt [0,4,0]; iso [plotW*0.7, plotW*0.8, plotW*0.7] lookAt [0,4,0]; front [0,6,plotL*1.1] lookAt [0,5,0]; top [0,plotL*1.5,0.01] lookAt [0,0,0]). Lerp factor 0.08; cancels when the user starts dragging (controls 'start' event); stops within 0.15ft of target.
+- OrbitControls makeDefault enableDamping dampingFactor={0.08} minDistance={5} maxDistance={150} maxPolarAngle={π/2 - 0.05} target={[0,5,0]} — makeDefault lets CameraRig read state.controls.
+- All geometry derived via useMemo keyed on [layout, floor, showAllFloors, style, showWalls, showFurniture]; pitched-roof ExtrudeGeometry and plot EdgesGeometry also memoized.
+- Verified: `bunx tsc --noEmit` → 0 errors in viewer-3d.tsx or furniture-3d.tsx (after fixing one return-type: CameraRig returns null, so its return type is React.JSX.Element | null). `bun run lint` exit 0. Dev server compiles cleanly (✓ Compiled in 276ms, HTTP 200 on /).
+
+Stage Summary:
+- Files changed: src/components/openblueprint/workspace/viewer-3d.tsx (full rewrite, ~960 lines, single-file, no new deps required — Environment, Grid, ContactShadows, Html, Text, OrbitControls all already exported by @react-three/drei v10).
+- Key visual upgrades vs old "bad" viewer:
+  1. ACES Filmic tone mapping + DPR up to 2 → cinematic, crisp rendering.
+  2. <Environment preset="apartment"> IBL → realistic material reflections on walls, floors, furniture (the single biggest upgrade).
+  3. Key + fill directional lights (was just key) → no more harsh dark sides.
+  4. Walls thickened 0.3 → 0.5 ft → real architectural shell feel.
+  5. Floor colours desaturated 18% → reads like real flooring instead of cartoon swatches.
+  6. Translucent cyan windows at proper sill height (was generic tinted overlays).
+  7. Per-style wall palettes/heights/roof types now exactly match the spec.
+  8. Real furniture via <FurnitureMesh3D> (was single-box proxies) — recognizable beds, sofas, tables, kitchen counters, bath fixtures, plants etc.
+  9. Smooth animated camera transitions between orbit/iso/front/top — animation cancels on user drag.
+  10. ContactShadows + infinite fading Grid + plot wireframe + north arrow for proper grounding and orientation context.
+- Public API unchanged — parent workspace's dynamic import + JSX call site need no edits.
+- Coordinate convention preserved: 1 unit = 1 ft, origin at plot centre, +Y up, worldX = item.x + item.width/2 - plotW/2, worldZ = item.y + item.length/2 - plotL/2. Multi-floor stacking uses worldY = floorIndex * 10.
+- Robustness: empty rooms/furniture render just the plot + grid + outline + north arrow (no crash); out-of-range floor clamped; layout.furniture ?? [] defensive.
+- Wrote agent-ctx record at /home/z/my-project/agent-ctx/5-b-3d-viewer-rebuilder.md.
+
+---
+Task ID: 5 (furniture + 3D + floorplan)
+Agent: main + subagents (5-a furniture-3d, 5-b viewer-3d rebuild)
+Task: Furniture library with drag-drop, 3D quality improvement, floor plan zero-waste BSP packing
+
+Work Log:
+- Added furniture to data model: FurnitureType (45 types), FurnitureItem, FurnitureCatalogEntry to types.ts; furniture[] field on LayoutData
+- Created furniture-catalog.ts: 45 furniture items across 9 categories (bedroom/living/dining/kitchen/bathroom/office/storage/decor/commercial) with dimensions, colors, prices, room-type associations
+- Rewrote layout engine: replaced shelf-packing with BSP (binary space partition) — recursively splits buildable rect so rooms tile perfectly with ZERO wasted space; split positions snapped to 0.5ft grid to eliminate rounding overlaps
+- Added autoPlaceFurniture(): auto-places sensible starter furniture in each room (bed+wardrobe in bedroom, sofa+coffee table+TV in living, counter+stove+sink+fridge in kitchen, dining set, toilet+vanity+shower in bath, desk+chair in office, etc.)
+- Updated store.ts: addFurniture, updateFurniture, deleteFurniture actions; selectedFurnitureId; furniturePanelOpen; furnitureCategory
+- Created furniture-symbol.tsx: top-down architectural SVG symbols for all 45 furniture types (beds with pillows/headboards, sofas with cushions, chairs, tables, kitchen counters with burners, toilets, bathtubs, plants, etc.)
+- Created furniture-library.tsx: draggable furniture panel with search, category tabs, grid of items with symbols + dimensions + prices; HTML5 drag-and-drop support
+- Updated blueprint-canvas.tsx: renders furniture symbols on canvas; supports drag-to-move, rotate handle, delete handle; HTML5 drop from library; 'R' key to rotate, Delete key for furniture; snap-to-grid
+- Subagent built furniture-3d.tsx: 3D furniture models for all 45 types using primitives (boxes/cylinders/spheres) with material-aware roughness/metalness
+- Subagent rebuilt viewer-3d.tsx: ACES Filmic tone mapping, Environment preset for IBL, hemisphere + directional + fill lights, ContactShadows, Grid, semi-transparent walls in cutaway mode, furniture via FurnitureMesh3D, floating HTML labels, camera rig with animated transitions
+- Made walls semi-transparent (opacity 0.25) in single-floor cutaway view so furniture is visible inside; solid in showAllFloors mode
+- Default 3D camera changed to isometric for better architectural overview
+- Fixed BSP rounding: snap splits to 0.5ft grid → eliminated all room overlaps → score jumped from 89 to 98/100
+
+Verification (Agent Browser + VLM):
+- Default config (30×40, 2 floors, 3 BHK): Layout valid, 11 rooms, 2400 sq.ft, score 98/100
+- 2D canvas: furniture symbols visible (beds, wardrobes, dining set with chairs, toilets, vanities, showers, kitchen counters, sofas, coffee tables, TV units, plants)
+- 3D view: furniture visible through semi-transparent walls; kitchen counters, sofa, table, staircase, plant all rendering; VLM rates "professional-grade architectural software output"
+- Furniture library: 45 items in 9 categories, draggable, search working
+- Floor plan: rooms tile perfectly with zero wasted space (BSP), no overlaps
+- Lint clean, HTTP 200, no runtime errors
+
+Stage Summary:
+- Transformed from basic to professional architectural software
+- Furniture library with 45 draggable items + auto-placement
+- 3D viewer rebuilt with realistic lighting, shadows, materials, furniture
+- Floor plan quality: 98/100 score, zero-waste BSP packing, no overlaps

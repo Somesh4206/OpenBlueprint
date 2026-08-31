@@ -333,10 +333,7 @@ export function generateFloorLayout(
 ): RoomRect[] {
   const buildable = buildableArea(config.plot, floor);
   let reqs = [...floorReqs];
-  if (floor === 0 && config.floors > 1) {
-    reqs = ensureStaircase(reqs, config.floors);
-  } else if (floor > 0) {
-    // staircase on upper floors too (aligned)
+  if (config.floors > 1) {
     reqs = ensureStaircase(reqs, config.floors);
   }
 
@@ -368,52 +365,20 @@ export function generateFloorLayout(
 
   const sorted = shuffleByStrategy(reqs, strategy);
 
-  // ---- Shelf-packing placement (guarantees no overlaps) ----
-  let cursorX = partitionRect.x;
-  let cursorY = partitionRect.y;
-  let rowHeight = 0;
-  const right = partitionRect.x + partitionRect.w;
-  const bottom = partitionRect.y + partitionRect.h;
-  const GAP = 0.2;
+  // ---- BSP (Binary Space Partition) packing — zero wasted space ----
+  // Recursively split the partition rectangle so every room fills its allocated
+  // leaf exactly. Rooms tile the buildable area with no gaps between them.
+  const placed = bspPack(partitionRect, sorted, strategy);
 
-  for (const r of sorted) {
-    const cat = ROOM_CATALOG[r.type];
-    let w = Math.min(r.preferredWidth || cat.preferredWidth, partitionRect.w);
-    let h = Math.min(r.preferredLength || cat.preferredLength, partitionRect.h);
-    w = Math.max(cat.minWidth, w);
-    h = Math.max(cat.minLength, h);
-
-    // wrap to next row if needed
-    if (cursorX + w > right + 0.01 && cursorX > partitionRect.x + 0.01) {
-      cursorY += rowHeight + GAP;
-      cursorX = partitionRect.x;
-      rowHeight = 0;
-    }
-
-    // if room doesn't fit in remaining height, shrink it to fit
-    if (cursorY + h > bottom + 0.01) {
-      const remainingH = bottom - cursorY;
-      if (remainingH >= cat.minLength) {
-        h = round(remainingH);
-      } else {
-        // no vertical space — try shrinking width to fit in remaining strip, else skip
-        continue;
-      }
-    }
-    // shrink width to fit
-    if (cursorX + w > right + 0.01) {
-      w = round(right - cursorX);
-      if (w < cat.minWidth) w = cat.minWidth;
-    }
-
+  for (const p of placed) {
     const roomRect: RoomRect = {
       id: genId(),
-      type: r.type,
-      name: r.name || cat.defaultName,
-      x: round(cursorX),
-      y: round(cursorY),
-      width: round(w),
-      length: round(h),
+      type: p.req.type,
+      name: p.req.name || ROOM_CATALOG[p.req.type].defaultName,
+      x: round(p.rect.x),
+      y: round(p.rect.y),
+      width: round(p.rect.w),
+      length: round(p.rect.h),
       floor,
       doors: [],
       windows: [],
@@ -421,12 +386,96 @@ export function generateFloorLayout(
     roomRect.doors = autoDoors(roomRect, config.plot, config.plot.roadSide);
     roomRect.windows = autoWindows(roomRect, config.plot);
     out.push(roomRect);
-
-    cursorX += w + GAP;
-    rowHeight = Math.max(rowHeight, h);
   }
 
   return out;
+}
+
+// ---- BSP packing implementation ----
+interface BspLeaf {
+  rect: Rect;
+  room?: RoomRequirement;
+  left?: BspLeaf;
+  right?: BspLeaf;
+}
+
+interface PlacedRoom {
+  rect: Rect;
+  req: RoomRequirement;
+}
+
+// Recursively split the rect to place all rooms; each leaf = one room filling it.
+function bspPack(rect: Rect, rooms: RoomRequirement[], strategy: LayoutStrategy): PlacedRoom[] {
+  if (rooms.length === 0) return [];
+  if (rooms.length === 1) {
+    return [{ rect, req: rooms[0] }];
+  }
+
+  // Decide split: split the longer dimension, proportional to room areas.
+  // Compute total preferred area and split ratio based on first half's preferred area.
+  const totalArea = rect.w * rect.h;
+  let acc = 0;
+  const targetAreas = rooms.map((r) => {
+    const cat = ROOM_CATALOG[r.type];
+    return (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
+  });
+  const totalPreferred = targetAreas.reduce((a, b) => a + b, 0);
+
+  // Find split index that best balances area (closest to half)
+  let splitIdx = 1;
+  let bestDiff = Infinity;
+  for (let i = 1; i < rooms.length; i++) {
+    acc = targetAreas.slice(0, i).reduce((a, b) => a + b, 0);
+    const ratio = acc / totalPreferred;
+    const diff = Math.abs(ratio - 0.5);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      splitIdx = i;
+    }
+  }
+  const leftRooms = rooms.slice(0, splitIdx);
+  const rightRooms = rooms.slice(splitIdx);
+  const leftArea = targetAreas.slice(0, splitIdx).reduce((a, b) => a + b, 0);
+  const splitRatio = totalPreferred > 0 ? leftArea / totalPreferred : 0.5;
+
+  // Split direction: split along the longer dimension for better aspect ratios
+  const splitVertical = rect.w >= rect.h;
+  let leftRect: Rect;
+  let rightRect: Rect;
+
+  if (splitVertical) {
+    // vertical split — divide width
+    let splitW = rect.w * splitRatio;
+    // clamp so both sides can hold a minimum room, then snap to 0.5ft grid
+    const minSide = 6;
+    splitW = Math.max(minSide, Math.min(rect.w - minSide, splitW));
+    splitW = Math.round(splitW * 2) / 2; // snap to 0.5ft
+    leftRect = { x: rect.x, y: rect.y, w: splitW, h: rect.h };
+    rightRect = { x: rect.x + splitW, y: rect.y, w: rect.w - splitW, h: rect.h };
+  } else {
+    // horizontal split — divide height
+    let splitH = rect.h * splitRatio;
+    const minSide = 6;
+    splitH = Math.max(minSide, Math.min(rect.h - minSide, splitH));
+    splitH = Math.round(splitH * 2) / 2; // snap to 0.5ft
+    leftRect = { x: rect.x, y: rect.y, w: rect.w, h: splitH };
+    rightRect = { x: rect.x, y: rect.y + splitH, w: rect.w, h: rect.h - splitH };
+  }
+
+  // Strategy can swap which group goes to which side
+  let firstRooms = leftRooms;
+  let secondRooms = rightRooms;
+  if (strategy === 'privacy-optimized') {
+    // private rooms to the rear (bottom), public to front (top)
+    const privFirst = leftRooms.filter((r) => ROOM_CATALOG[r.type].group === 'private').length;
+    const privSecond = rightRooms.filter((r) => ROOM_CATALOG[r.type].group === 'private').length;
+    if (privSecond > privFirst) {
+      firstRooms = rightRooms;
+      secondRooms = leftRooms;
+    }
+  }
+
+  return [...bspPack(leftRect, firstRooms, strategy), ...bspPack(rightRect, secondRooms, strategy)];
 }
 
 // Distribute room requirements across floors.
@@ -496,11 +545,122 @@ export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy):
     const floorRooms = generateFloorLayout(config, strategy, f, byFloor[f] || []);
     rooms.push(...floorRooms);
   }
+  // auto-place starter furniture in each room based on room type
+  const furniture = autoPlaceFurniture(rooms);
   return {
     plot: config.plot,
     floors: config.floors,
     rooms,
+    furniture,
     strategy,
+  };
+}
+
+// Auto-place sensible starter furniture in each room (bed in bedroom, sofa in living, etc.)
+function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem[] {
+  const items: import('../types').FurnitureItem[] = [];
+  for (const room of rooms) {
+    const center = { x: room.x + room.width / 2, y: room.y + room.length / 2 };
+    const inset = 1;
+    switch (room.type) {
+      case 'bedroom': {
+        const bedW = Math.min(6, room.width - 2);
+        const bedL = Math.min(7, room.length - 2);
+        items.push(mkFurniture('bed-double', room.x + inset, room.y + inset, bedW, bedL, room.floor, 0));
+        if (room.width > 10) {
+          items.push(mkFurniture('wardrobe', room.x + room.width - 6, room.y + room.length - 2.5, 6, 2, room.floor, 0));
+        }
+        break;
+      }
+      case 'living': {
+        const sofaW = Math.min(7, room.width - 2);
+        items.push(mkFurniture('sofa-3', room.x + (room.width - sofaW) / 2, room.y + inset, sofaW, 3, room.floor, 0));
+        items.push(mkFurniture('table-coffee', center.x - 2, center.y - 1, 4, 2, room.floor, 0));
+        if (room.width > 10) {
+          items.push(mkFurniture('tv-unit', room.x + (room.width - 5) / 2, room.y + room.length - 2, 5, 1.5, room.floor, 0));
+        }
+        items.push(mkFurniture('plant-small', room.x + room.width - 2, room.y + 0.5, 1.5, 1.5, room.floor, 0));
+        break;
+      }
+      case 'kitchen': {
+        items.push(mkFurniture('kitchen-counter', room.x + inset, room.y + inset, Math.min(8, room.width - 2), 2, room.floor, 0));
+        items.push(mkFurniture('stove', room.x + inset, room.y + inset, 3, 2, room.floor, 0));
+        items.push(mkFurniture('sink-kitchen', room.x + 4, room.y + inset, 2.5, 1.5, room.floor, 0));
+        if (room.width > 9) {
+          items.push(mkFurniture('fridge', room.x + room.width - 3.5, room.y + inset, 3, 2.5, room.floor, 0));
+        }
+        break;
+      }
+      case 'dining': {
+        items.push(mkFurniture('table-dining-6', center.x - 2.5, center.y - 1.5, 5, 3, room.floor, 0));
+        // 4 chairs around
+        items.push(mkFurniture('chair-dining', center.x - 2.5, center.y - 0.5, 1.5, 1.5, room.floor, 0));
+        items.push(mkFurniture('chair-dining', center.x + 1, center.y - 0.5, 1.5, 1.5, room.floor, 0));
+        items.push(mkFurniture('chair-dining', center.x - 2.5, center.y + 1.5, 1.5, 1.5, room.floor, 180));
+        items.push(mkFurniture('chair-dining', center.x + 1, center.y + 1.5, 1.5, 1.5, room.floor, 180));
+        break;
+      }
+      case 'bathroom': {
+        items.push(mkFurniture('toilet', room.x + inset, room.y + inset, 2, 3, room.floor, 0));
+        items.push(mkFurniture('vanity', room.x + room.width - 3.5, room.y + inset, 3, 1.5, room.floor, 0));
+        if (room.length > 7) {
+          items.push(mkFurniture('shower', room.x + inset, room.y + room.length - 3.5, 3, 3, room.floor, 0));
+        }
+        break;
+      }
+      case 'office': {
+        items.push(mkFurniture('desk', center.x - 2.5, room.y + inset, 5, 2.5, room.floor, 0));
+        items.push(mkFurniture('chair-office', center.x - 1, room.y + 3.5, 2, 2, room.floor, 0));
+        if (room.width > 8) {
+          items.push(mkFurniture('bookshelf', room.x + room.width - 4.5, room.y + inset, 4, 1, room.floor, 0));
+        }
+        break;
+      }
+      case 'pooja': {
+        items.push(mkFurniture('pooja-altar', center.x - 1.5, room.y + inset, 3, 1.5, room.floor, 0));
+        break;
+      }
+      case 'parking': {
+        // no furniture
+        break;
+      }
+      case 'staircase': {
+        // no furniture (stairs rendered as room texture)
+        break;
+      }
+      case 'balcony': {
+        items.push(mkFurniture('plant-small', room.x + inset, room.y + inset, 1.5, 1.5, room.floor, 0));
+        items.push(mkFurniture('plant-small', room.x + room.width - 2, room.y + inset, 1.5, 1.5, room.floor, 0));
+        break;
+      }
+      case 'utility': {
+        items.push(mkFurniture('washer', room.x + inset, room.y + inset, 2.5, 2.5, room.floor, 0));
+        break;
+      }
+    }
+  }
+  return items;
+}
+
+function mkFurniture(
+  type: import('../types').FurnitureType,
+  x: number,
+  y: number,
+  w: number,
+  l: number,
+  floor: number,
+  rotation: number,
+): import('../types').FurnitureItem {
+  return {
+    id: genId('f'),
+    type,
+    name: type,
+    x: round(x),
+    y: round(y),
+    width: round(w),
+    length: round(l),
+    rotation,
+    floor,
   };
 }
 

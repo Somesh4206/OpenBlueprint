@@ -31,6 +31,59 @@ export interface RoomRect {
   windows: WindowMarker[];
 }
 
+// ---- Furniture ----
+export type FurnitureType =
+  | 'bed-single' | 'bed-double' | 'bed-king'
+  | 'sofa-2' | 'sofa-3' | 'sofa-l' | 'armchair'
+  | 'chair-dining' | 'chair-office' | 'bar-stool'
+  | 'table-round' | 'table-rect' | 'table-coffee' | 'table-dining-6'
+  | 'desk'
+  | 'wardrobe' | 'bookshelf' | 'shelf-wall'
+  | 'tv-unit' | 'tv-wall'
+  | 'kitchen-counter' | 'kitchen-island' | 'stove' | 'sink-kitchen' | 'fridge'
+  | 'toilet' | 'bathtub' | 'shower' | 'vanity' | 'washer'
+  | 'plant-small' | 'plant-large'
+  | 'rug' | 'lamp-floor' | 'pooja-altar'
+  | 'dining-set-4' | 'dining-set-6'
+  | 'reception-desk' | 'meeting-table' | 'office-cabin'
+  | 'clothing-rack' | 'display-shelf' | 'service-counter';
+
+export interface FurnitureItem {
+  id: string;
+  type: FurnitureType;
+  name: string;
+  x: number; // top-left in plot units (ft), relative to plot origin
+  y: number;
+  width: number; // bounding box width (ft) — before rotation
+  length: number; // bounding box length (ft)
+  rotation: number; // 0 | 90 | 180 | 270
+  floor: number;
+  color?: string;
+}
+
+export type FurnitureCategory =
+  | 'bedroom'
+  | 'living'
+  | 'dining'
+  | 'kitchen'
+  | 'bathroom'
+  | 'office'
+  | 'storage'
+  | 'decor'
+  | 'commercial';
+
+export interface FurnitureCatalogEntry {
+  type: FurnitureType;
+  name: string;
+  category: FurnitureCategory;
+  width: number; // ft
+  length: number; // ft
+  color: string;
+  // room types where this furniture is commonly suggested
+  roomTypes?: RoomType[];
+  price?: number; // optional INR for display
+}
+
 export interface DoorMarker {
   wall: 'top' | 'right' | 'bottom' | 'left';
   pos: number; // 0..1 along the wall
@@ -105,6 +158,7 @@ export interface LayoutData {
   plot: PlotConfig;
   floors: number;
   rooms: RoomRect[];
+  furniture: FurnitureItem[];
   strategy: LayoutStrategy;
 }
 

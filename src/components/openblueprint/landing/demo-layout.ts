@@ -23,6 +23,7 @@ export const demoLayout: LayoutData = {
     setbackSides: 0,
   },
   floors: 1,
+  furniture: [],
   strategy: 'modern-open',
   rooms: [
     {

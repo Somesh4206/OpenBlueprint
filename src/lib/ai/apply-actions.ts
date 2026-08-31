@@ -82,7 +82,7 @@ export function applyActions(layout: LayoutData, config: ProjectConfig, actions:
     }
   }
 
-  return { ...layout, rooms };
+  return { ...layout, rooms, furniture: layout.furniture || [] };
 }
 
 function relocateRoom(room: RoomRect, plot: { width: number; length: number }, loc: string): RoomRect {

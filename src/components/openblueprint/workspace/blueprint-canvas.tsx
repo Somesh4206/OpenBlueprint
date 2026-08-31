@@ -1,38 +1,48 @@
 'use client';
 
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { LayoutData, ProjectConfig, RoomRect, ValidationResult, DoorMarker, WindowMarker } from '@/lib/types';
+import { LayoutData, ProjectConfig, RoomRect, ValidationResult, DoorMarker, WindowMarker, FurnitureItem, FurnitureType } from '@/lib/types';
 import { ROOM_CATALOG } from '@/lib/room-catalog';
+import { FURNITURE_MAP } from '@/lib/furniture-catalog';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { Maximize, Ruler } from 'lucide-react';
+import { FurnitureSymbol } from './furniture-symbol';
 
 interface Props {
   layout: LayoutData;
   config: ProjectConfig;
   tool: string;
   selectedRoomId: string | null;
+  selectedFurnitureId: string | null;
   onSelectRoom: (id: string | null) => void;
+  onSelectFurniture: (id: string | null) => void;
   onUpdateRoom: (id: string, patch: Partial<RoomRect>) => void;
   onDeleteRoom: (id: string) => void;
   onAddRoom: (type: RoomRect['type']) => void;
+  onAddFurniture: (type: FurnitureType, x: number, y: number) => void;
+  onUpdateFurniture: (id: string, patch: Partial<FurnitureItem>) => void;
+  onDeleteFurniture: (id: string) => void;
   currentFloor: number;
   showAllFloors: boolean;
   showGrid: boolean;
   showDims: boolean;
   showLabels: boolean;
+  showFurniture: boolean;
   zoom: number;
   accentColor: string;
   validation: ValidationResult;
 }
 
-type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | null;
+type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'furniture-move' | 'furniture-rotate' | null;
 
 interface DragState {
-  roomId: string;
+  roomId?: string;
+  furnitureId?: string;
   mode: DragMode;
   startMouse: { x: number; y: number };
-  startRoom: RoomRect;
+  startRoom?: RoomRect;
+  startFurniture?: FurnitureItem;
 }
 
 const SNAP = 0.5; // snap to 0.5 ft
@@ -42,15 +52,21 @@ export function BlueprintCanvas({
   config,
   tool,
   selectedRoomId,
+  selectedFurnitureId,
   onSelectRoom,
+  onSelectFurniture,
   onUpdateRoom,
   onDeleteRoom,
   onAddRoom,
+  onAddFurniture,
+  onUpdateFurniture,
+  onDeleteFurniture,
   currentFloor,
   showAllFloors,
   showGrid,
   showDims,
   showLabels,
+  showFurniture,
   zoom,
   accentColor,
   validation,
@@ -113,9 +129,30 @@ export function BlueprintCanvas({
       (e.target as Element).setPointerCapture(e.pointerId);
       return;
     }
-    // start drag on a room
     if (drag) return;
     const target = (e.target as Element);
+    // furniture hit-test first (furniture renders on top)
+    const furnitureId = target.getAttribute('data-furniture-id');
+    const furnitureHandle = target.getAttribute('data-furniture-handle');
+    if (furnitureId) {
+      const f = layout.furniture.find((x) => x.id === furnitureId);
+      if (f) {
+        // delete handle — immediate delete, no drag
+        if (furnitureHandle === 'delete') {
+          onDeleteFurniture(f.id);
+          return;
+        }
+        onSelectFurniture(f.id);
+        if (furnitureHandle === 'rotate') {
+          setDrag({ furnitureId, mode: 'furniture-rotate', startMouse: { x: e.clientX, y: e.clientY }, startFurniture: { ...f } });
+        } else {
+          setDrag({ furnitureId, mode: 'furniture-move', startMouse: { x: e.clientX, y: e.clientY }, startFurniture: { ...f } });
+        }
+        (e.target as Element).setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    // room hit-test
     const roomId = target.getAttribute('data-room-id');
     const handle = target.getAttribute('data-handle') as DragMode;
     if (roomId) {
@@ -130,11 +167,11 @@ export function BlueprintCanvas({
         (e.target as Element).setPointerCapture(e.pointerId);
       }
     } else {
-      // clicked empty space
       if (tool === 'room') {
         onAddRoom('bedroom');
       } else {
         onSelectRoom(null);
+        onSelectFurniture(null);
       }
     }
   }
@@ -147,7 +184,29 @@ export function BlueprintCanvas({
     if (!drag) return;
     const dx = (e.clientX - drag.startMouse.x) / scale;
     const dy = (e.clientY - drag.startMouse.y) / scale;
+
+    // furniture drag
+    if (drag.mode === 'furniture-move' && drag.startFurniture) {
+      const f = drag.startFurniture;
+      const maxX = plot.width - (f.rotation === 90 || f.rotation === 270 ? f.length : f.width);
+      const maxY = plot.length - (f.rotation === 90 || f.rotation === 270 ? f.width : f.length);
+      onUpdateFurniture(drag.furnitureId!, {
+        x: snap(Math.max(0, Math.min(maxX, f.x + dx))),
+        y: snap(Math.max(0, Math.min(maxY, f.y + dy))),
+      });
+      return;
+    }
+    if (drag.mode === 'furniture-rotate' && drag.startFurniture) {
+      // rotate by 90° on significant horizontal drag
+      const f = drag.startFurniture;
+      const newRot = ((Math.round((f.rotation + dx) / 90) * 90) % 360 + 360) % 360;
+      onUpdateFurniture(drag.furnitureId!, { rotation: newRot });
+      return;
+    }
+
+    // room drag
     const r = drag.startRoom;
+    if (!r) return;
     let patch: Partial<RoomRect> = {};
     if (drag.mode === 'move') {
       patch = { x: snap(Math.max(0, Math.min(plot.width - r.width, r.x + dx))), y: snap(Math.max(0, Math.min(plot.length - r.length, r.y + dy))) };
@@ -170,7 +229,7 @@ export function BlueprintCanvas({
       const newY = snap(Math.max(0, Math.min(y2 - 4, r.y + dy)));
       patch = { x: newX, y: newY, width: snap(x2 - newX), length: snap(y2 - newY) };
     }
-    onUpdateRoom(drag.roomId, patch);
+    onUpdateRoom(drag.roomId!, patch);
   }
 
   function onPointerUp(e: React.PointerEvent) {
@@ -184,16 +243,47 @@ export function BlueprintCanvas({
     try { (e.target as Element).releasePointerCapture(e.pointerId); } catch {}
   }
 
-  // delete key
+  // HTML5 drag-and-drop from furniture library
+  function onDragOver(e: React.DragEvent) {
+    if (e.dataTransfer.types.includes('application/x-furniture-type')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+  function onDrop(e: React.DragEvent) {
+    const type = e.dataTransfer.getData('application/x-furniture-type');
+    if (!type) return;
+    e.preventDefault();
+    const rect = svgRef.current!.getBoundingClientRect();
+    const px = (e.clientX - rect.left - originX) / scale;
+    const py = (e.clientY - rect.top - originY) / scale;
+    const cat = FURNITURE_MAP[type as FurnitureType];
+    if (cat) {
+      onAddFurniture(type as FurnitureType, snap(px - cat.width / 2), snap(py - cat.length / 2));
+    }
+  }
+
+  // delete key — deletes selected room OR furniture
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRoomId && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
-        onDeleteRoom(selectedRoomId);
+      if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        if (selectedFurnitureId) {
+          onDeleteFurniture(selectedFurnitureId);
+        } else if (selectedRoomId) {
+          onDeleteRoom(selectedRoomId);
+        }
+      }
+      // 'R' to rotate selected furniture
+      if ((e.key === 'r' || e.key === 'R') && selectedFurnitureId && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        const f = layout.furniture.find((x) => x.id === selectedFurnitureId);
+        if (f) {
+          onUpdateFurniture(selectedFurnitureId, { rotation: ((f.rotation + 90) % 360 + 360) % 360 });
+        }
       }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedRoomId, onDeleteRoom]);
+  }, [selectedRoomId, selectedFurnitureId, onDeleteRoom, onDeleteFurniture, onUpdateFurniture, layout.furniture]);
 
   // error rooms
   const errorRoomIds = new Set(validation.errors.filter((e) => e.roomId).map((e) => e.roomId!));
@@ -203,7 +293,13 @@ export function BlueprintCanvas({
   const visibleRooms = layout.rooms.filter((r) => showAllFloors || r.floor === currentFloor);
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bp-grid overflow-hidden select-none" style={{ cursor: tool === 'pan' ? (panning ? 'grabbing' : 'grab') : 'default' }}>
+    <div
+      ref={containerRef}
+      className="absolute inset-0 bp-grid overflow-hidden select-none"
+      style={{ cursor: tool === 'pan' ? (panning ? 'grabbing' : 'grab') : 'default' }}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
       <svg
         ref={svgRef}
         className="absolute inset-0 w-full h-full"
@@ -263,6 +359,22 @@ export function BlueprintCanvas({
             dimmed={showAllFloors && room.floor !== currentFloor}
           />
         ))}
+
+        {/* Furniture */}
+        {showFurniture && layout.furniture
+          .filter((f) => showAllFloors || f.floor === currentFloor)
+          .map((f) => (
+            <FurnitureShape
+              key={f.id}
+              item={f}
+              scale={scale}
+              originX={originX}
+              originY={originY}
+              selected={selectedFurnitureId === f.id}
+              accentColor={accentColor}
+              dimmed={showAllFloors && f.floor !== currentFloor}
+            />
+          ))}
 
         {/* North arrow */}
         <NorthArrow originX={originX + plotW - 24} originY={originY + 20} accent={accentColor} />
@@ -524,3 +636,70 @@ function fmt(n: number): string {
   if (inch === 0) return `${ft}'`;
   return `${ft}'${inch}"`;
 }
+
+// ---- Furniture shape (renders the SVG symbol + selection handles) ----
+function FurnitureShape({
+  item,
+  scale,
+  originX,
+  originY,
+  selected,
+  accentColor,
+  dimmed,
+}: {
+  item: FurnitureItem;
+  scale: number;
+  originX: number;
+  originY: number;
+  selected: boolean;
+  accentColor: string;
+  dimmed: boolean;
+}) {
+  const cat = FURNITURE_MAP[item.type];
+  const color = item.color || cat?.color || '#999';
+  // bounding box after rotation
+  const rotated = item.rotation === 90 || item.rotation === 270;
+  const bw = (rotated ? item.length : item.width) * scale;
+  const bl = (rotated ? item.width : item.length) * scale;
+  // center in screen coords
+  const cx = originX + (item.x + item.width / 2) * scale;
+  const cy = originY + (item.y + item.length / 2) * scale;
+  const tx = cx - bw / 2;
+  const ty = cy - bl / 2;
+
+  const opacity = dimmed ? 0.4 : 1;
+  // scale factor from the 100×100 symbol viewBox to the furniture's pixel size
+  const sx = (item.width * scale) / 100;
+  const sy = (item.length * scale) / 100;
+
+  return (
+    <g style={{ opacity, cursor: 'move' }} transform={`translate(${tx} ${ty}) rotate(${item.rotation} ${bw / 2} ${bl / 2})`}>
+      {/* invisible hit area covering the bounding box */}
+      <rect data-furniture-id={item.id} x={0} y={0} width={bw} height={bl} fill="transparent" />
+      {/* the symbol — a nested <svg> scaled to the furniture size */}
+      <g data-furniture-id={item.id} transform={`scale(${sx} ${sy})`}>
+        <svg viewBox="0 0 100 100" width={100} height={100} style={{ overflow: 'visible' }}>
+          <FurnitureSymbol type={item.type} color={color} className="w-full h-full" />
+        </svg>
+      </g>
+      {/* selection outline + handles */}
+      {selected && (
+        <>
+          <rect x={-2} y={-2} width={bw + 4} height={bl + 4} fill="none" stroke={accentColor} strokeWidth={1.5} strokeDasharray="4 2" pointerEvents="none" />
+          {/* rotate handle (top-right) */}
+          <g data-furniture-id={item.id} data-furniture-handle="rotate" style={{ cursor: 'grab' }}>
+            <circle cx={bw + 12} cy={-12} r={7} fill={accentColor} stroke="white" strokeWidth={1.5} />
+            <path d={`M ${bw + 9} -12 A 3 3 0 1 1 ${bw + 15} -12`} fill="none" stroke="white" strokeWidth={1.2} />
+          </g>
+          {/* delete handle (top-left) */}
+          <g data-furniture-id={item.id} data-furniture-handle="delete" style={{ cursor: 'pointer' }}>
+            <circle cx={-12} cy={-12} r={7} fill="#dc2626" stroke="white" strokeWidth={1.5} />
+            <line x1={-15} y1={-15} x2={-9} y2={-9} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+            <line x1={-9} y1={-15} x2={-15} y2={-9} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+          </g>
+        </>
+      )}
+    </g>
+  );
+}
+

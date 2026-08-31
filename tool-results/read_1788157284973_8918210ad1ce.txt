@@ -1,0 +1,1387 @@
+     1→'use client';
+     2→
+     3→// =========================================================================
+     4→// OpenBlueprint — 3D Viewer (Task 8)
+     5→// React Three Fiber + @react-three/drei visualization of a LayoutData model.
+     6→// 1 unit = 1 foot. Origin at the centre of the plot. +Y is up.
+     7→// =========================================================================
+     8→
+     9→import React, { useRef, useMemo, useEffect, Suspense } from 'react';
+    10→import type {
+    11→  LayoutData,
+    12→  DesignStyle,
+    13→  RoomRect,
+    14→  DoorMarker,
+    15→  WindowMarker,
+    16→} from '@/lib/types';
+    17→import { ROOM_CATALOG } from '@/lib/room-catalog';
+    18→import { Canvas, useFrame, useThree } from '@react-three/fiber';
+    19→import {
+    20→  OrbitControls,
+    21→  Html,
+    22→  Text,
+    23→  ContactShadows,
+    24→  Grid,
+    25→} from '@react-three/drei';
+    26→import * as THREE from 'three';
+    27→
+    28→// =========================================================================
+    29→// Public API
+    30→// =========================================================================
+    31→
+    32→export interface Viewer3DProps {
+    33→  layout: LayoutData;
+    34→  floor: number;
+    35→  showAllFloors: boolean;
+    36→  accentColor: string;
+    37→  style: DesignStyle;
+    38→  showWalls: boolean;
+    39→  showFurniture: boolean;
+    40→  showLabels: boolean;
+    41→  cameraView: 'orbit' | 'top' | 'front' | 'isometric';
+    42→}
+    43→
+    44→export function Viewer3D(props: Viewer3DProps): React.JSX.Element {
+    45→  const { layout } = props;
+    46→  const plotW = layout.plot.width;
+    47→  const plotL = layout.plot.length;
+    48→  const maxDim = Math.max(plotW, plotL, 20);
+    49→  const initialCam: [number, number, number] = [
+    50→    maxDim * 0.85,
+    51→    maxDim * 0.85,
+    52→    maxDim * 1.1,
+    53→  ];
+    54→
+    55→  return (
+    56→    <Canvas
+    57→      shadows
+    58→      dpr={[1, 1.5]}
+    59→      gl={{ antialias: true, preserveDrawingBuffer: true }}
+    60→      camera={{ position: initialCam, fov: 45, near: 0.1, far: 5000 }}
+    61→    >
+    62→      <Suspense fallback={null}>
+    63→        <Scene {...props} />
+    64→      </Suspense>
+    65→    </Canvas>
+    66→  );
+    67→}
+    68→
+    69→// =========================================================================
+    70→// Style configuration
+    71→// =========================================================================
+    72→
+    73→interface StyleConfig {
+    74→  wallHeight: number;
+    75→  wallColor: string;
+    76→  wallRoughness: number;
+    77→  roofType: 'flat' | 'pitched' | 'overhang';
+    78→  roofOverhang: number;
+    79→  roofOpacity: number;
+    80→  windowTint: string;
+    81→  windowOpacity: number;
+    82→  windowScale: number;
+    83→  accentTrim: boolean;
+    84→  trimColor: string;
+    85→  slabThickness: number;
+    86→  slabColor: string;
+    87→  stairColor: string;
+    88→  furnitureColor: string;
+    89→}
+    90→
+    91→const STYLE_CONFIG: Record<DesignStyle, StyleConfig> = {
+    92→  modern: {
+    93→    wallHeight: 9,
+    94→    wallColor: '#eceff2',
+    95→    wallRoughness: 0.7,
+    96→    roofType: 'flat',
+    97→    roofOverhang: 0,
+    98→    roofOpacity: 0.32,
+    99→    windowTint: '#7fd4e8',
+   100→    windowOpacity: 0.55,
+   101→    windowScale: 1.25,
+   102→    accentTrim: false,
+   103→    trimColor: '#2b4a7a',
+   104→    slabThickness: 0.4,
+   105→    slabColor: '#cfd5da',
+   106→    stairColor: '#a8aeb4',
+   107→    furnitureColor: '#6b7280',
+   108→  },
+   109→  minimal: {
+   110→    wallHeight: 8,
+   111→    wallColor: '#d6d8db',
+   112→    wallRoughness: 0.9,
+   113→    roofType: 'flat',
+   114→    roofOverhang: 0,
+   115→    roofOpacity: 0.28,
+   116→    windowTint: '#9fb6c0',
+   117→    windowOpacity: 0.45,
+   118→    windowScale: 1.0,
+   119→    accentTrim: false,
+   120→    trimColor: '#525252',
+   121→    slabThickness: 0.4,
+   122→    slabColor: '#c8cace',
+   123→    stairColor: '#9ca0a4',
+   124→    furnitureColor: '#7a7d80',
+   125→  },
+   126→  traditional: {
+   127→    wallHeight: 9,
+   128→    wallColor: '#d8c4a8',
+   129→    wallRoughness: 0.85,
+   130→    roofType: 'pitched',
+   131→    roofOverhang: 1.5,
+   132→    roofOpacity: 0.6,
+   133→    windowTint: '#9fc7d2',
+   134→    windowOpacity: 0.5,
+   135→    windowScale: 0.9,
+   136→    accentTrim: true,
+   137→    trimColor: '#6b4423',
+   138→    slabThickness: 0.4,
+   139→    slabColor: '#cab7a0',
+   140→    stairColor: '#a08a6e',
+   141→    furnitureColor: '#7a5a3a',
+   142→  },
+   143→  contemporary: {
+   144→    wallHeight: 9,
+   145→    wallColor: '#cfd3d8',
+   146→    wallRoughness: 0.55,
+   147→    roofType: 'overhang',
+   148→    roofOverhang: 3,
+   149→    roofOpacity: 0.4,
+   150→    windowTint: '#82d2e8',
+   151→    windowOpacity: 0.6,
+   152→    windowScale: 1.45,
+   153→    accentTrim: true,
+   154→    trimColor: '#3a3f4a',
+   155→    slabThickness: 0.4,
+   156→    slabColor: '#c2c6cb',
+   157→    stairColor: '#9aa0a6',
+   158→    furnitureColor: '#4a5258',
+   159→  },
+   160→  luxury: {
+   161→    wallHeight: 10.5,
+   162→    wallColor: '#ece4d4',
+   163→    wallRoughness: 0.45,
+   164→    roofType: 'flat',
+   165→    roofOverhang: 2,
+   166→    roofOpacity: 0.32,
+   167→    windowTint: '#88dcec',
+   168→    windowOpacity: 0.62,
+   169→    windowScale: 1.55,
+   170→    accentTrim: true,
+   171→    trimColor: '#9b7a3a',
+   172→    slabThickness: 0.5,
+   173→    slabColor: '#d8cdb5',
+   174→    stairColor: '#a89a78',
+   175→    furnitureColor: '#7a6a4a',
+   176→  },
+   177→};
+   178→
+   179→const WALL_THICKNESS = 0.3;
+   180→const DOOR_HEIGHT = 7;
+   181→const WINDOW_BASE_HEIGHT = 3.5;
+   182→const WINDOW_BOTTOM = 3;
+   183→
+   184→// =========================================================================
+   185→// Geometry helpers
+   186→// =========================================================================
+   187→
+   188→function to3DX(x: number, plotWidth: number): number {
+   189→  return x - plotWidth / 2;
+   190→}
+   191→function to3DZ(y: number, plotLength: number): number {
+   192→  return y - plotLength / 2;
+   193→}
+   194→
+   195→interface Segment {
+   196→  start: number;
+   197→  end: number;
+   198→}
+   199→
+   200→/** Split a 1-D wall run by door openings (pos is 0..1 along the wall). */
+   201→function splitWallByOpenings(
+   202→  wallLength: number,
+   203→  openings: { pos: number; width: number }[],
+   204→): Segment[] {
+   205→  if (wallLength <= 0) return [];
+   206→  if (openings.length === 0) return [{ start: 0, end: wallLength }];
+   207→  const sorted = openings
+   208→    .map((o) => ({
+   209→      start: o.pos * wallLength - o.width / 2,
+   210→      end: o.pos * wallLength + o.width / 2,
+   211→    }))
+   212→    .filter((o) => o.end > 0.05 && o.start < wallLength - 0.05)
+   213→    .map((o) => ({
+   214→      start: Math.max(0, o.start),
+   215→      end: Math.min(wallLength, o.end),
+   216→    }))
+   217→    .sort((a, b) => a.start - b.start);
+   218→  const segments: Segment[] = [];
+   219→  let cursor = 0;
+   220→  for (const o of sorted) {
+   221→    if (o.start > cursor + 0.05) segments.push({ start: cursor, end: o.start });
+   222→    cursor = Math.max(cursor, o.end);
+   223→  }
+   224→  if (cursor < wallLength - 0.05) segments.push({ start: cursor, end: wallLength });
+   225→  return segments.filter((s) => s.end - s.start > 0.05);
+   226→}
+   227→
+   228→function doorsOn(room: RoomRect, wall: 'top' | 'right' | 'bottom' | 'left') {
+   229→  return room.doors.filter((d) => d.wall === wall);
+   230→}
+   231→function windowsOn(room: RoomRect, wall: 'top' | 'right' | 'bottom' | 'left') {
+   232→  return room.windows.filter((w) => w.wall === wall);
+   233→}
+   234→
+   235→// =========================================================================
+   236→// Computed scene model
+   237→// =========================================================================
+   238→
+   239→interface BoxData {
+   240→  position: [number, number, number];
+   241→  size: [number, number, number];
+   242→}
+   243→interface SlabData {
+   244→  position: [number, number, number];
+   245→  size: [number, number];
+   246→  color: string;
+   247→}
+   248→interface LabelData {
+   249→  position: [number, number, number];
+   250→  text: string;
+   251→  subtext: string;
+   252→  color: string;
+   253→}
+   254→interface Footprint {
+   255→  minX: number;
+   256→  maxX: number;
+   257→  minZ: number;
+   258→  maxZ: number;
+   259→}
+   260→interface ComputedScene {
+   261→  floorSlabs: SlabData[];
+   262→  interFloorSlabs: SlabData[];
+   263→  walls: BoxData[];
+   264→  trims: BoxData[];
+   265→  windows: BoxData[];
+   266→  doorPanels: BoxData[];
+   267→  stairs: BoxData[];
+   268→  furniture: BoxData[];
+   269→  labels: LabelData[];
+   270→  footprint: Footprint | null;
+   271→  totalBuildingHeight: number;
+   272→  roofY: number;
+   273→}
+   274→
+   275→function computeScene(
+   276→  layout: LayoutData,
+   277→  floor: number,
+   278→  showAllFloors: boolean,
+   279→  style: DesignStyle,
+   280→  showWalls: boolean,
+   281→  showFurniture: boolean,
+   282→): ComputedScene {
+   283→  const cfg = STYLE_CONFIG[style];
+   284→  const wallHeight = cfg.wallHeight;
+   285→  const floorHeight = wallHeight + cfg.slabThickness;
+   286→  const plotW = layout.plot.width;
+   287→  const plotL = layout.plot.length;
+   288→
+   289→  const floorsRendered: number[] = [];
+   290→  if (showAllFloors) {
+   291→    for (let f = 0; f < layout.floors; f++) floorsRendered.push(f);
+   292→  } else {
+   293→    // Always include the requested floor (clamp to valid range).
+   294→    const f = Math.max(0, Math.min(floor, Math.max(0, layout.floors - 1)));
+   295→    floorsRendered.push(f);
+   296→  }
+   297→  const floorBaseYs = floorsRendered.map((f) => f * floorHeight);
+   298→
+   299→  const floorSlabs: SlabData[] = [];
+   300→  const interFloorSlabs: SlabData[] = [];
+   301→  const walls: BoxData[] = [];
+   302→  const trims: BoxData[] = [];
+   303→  const windows: BoxData[] = [];
+   304→  const doorPanels: BoxData[] = [];
+   305→  const stairs: BoxData[] = [];
+   306→  const furniture: BoxData[] = [];
+   307→  const labels: LabelData[] = [];
+   308→
+   309→  let minX = Infinity;
+   310→  let maxX = -Infinity;
+   311→  let minZ = Infinity;
+   312→  let maxZ = -Infinity;
+   313→
+   314→  floorsRendered.forEach((f, idx) => {
+   315→    const baseY = floorBaseYs[idx];
+   316→    const floorRooms = layout.rooms.filter((r) => r.floor === f);
+   317→
+   318→    // Footprint of this floor (for inter-floor slab).
+   319→    let fMinX = Infinity;
+   320→    let fMaxX = -Infinity;
+   321→    let fMinZ = Infinity;
+   322→    let fMaxZ = -Infinity;
+   323→
+   324→    floorRooms.forEach((room) => {
+   325→      const cx = to3DX(room.x + room.width / 2, plotW);
+   326→      const cz = to3DZ(room.y + room.length / 2, plotL);
+   327→      const isStaircase = room.type === 'staircase';
+   328→      const isOpenAir = room.type === 'parking' || room.type === 'balcony';
+   329→      const catalog = ROOM_CATALOG[room.type];
+   330→
+   331→      // Floor slab (per-room, colored by catalog color).
+   332→      const slabColor = isOpenAir ? '#cfcfcf' : catalog?.color ?? '#e8e8e8';
+   333→      floorSlabs.push({
+   334→        position: [cx, baseY + 0.02, cz],
+   335→        size: [room.width, room.length],
+   336→        color: slabColor,
+   337→      });
+   338→
+   339→      // Track footprints.
+   340→      const rMinX = to3DX(room.x, plotW);
+   341→      const rMaxX = to3DX(room.x + room.width, plotW);
+   342→      const rMinZ = to3DZ(room.y, plotL);
+   343→      const rMaxZ = to3DZ(room.y + room.length, plotL);
+   344→      minX = Math.min(minX, rMinX);
+   345→      maxX = Math.max(maxX, rMaxX);
+   346→      minZ = Math.min(minZ, rMinZ);
+   347→      maxZ = Math.max(maxZ, rMaxZ);
+   348→      fMinX = Math.min(fMinX, rMinX);
+   349→      fMaxX = Math.max(fMaxX, rMaxX);
+   350→      fMinZ = Math.min(fMinZ, rMinZ);
+   351→      fMaxZ = Math.max(fMaxZ, rMaxZ);
+   352→
+   353→      // Walls (skip open-air rooms like parking/balcony).
+   354→      if (showWalls && !isOpenAir) {
+   355→        addRoomWalls(
+   356→          room,
+   357→          baseY,
+   358→          wallHeight,
+   359→          plotW,
+   360→          plotL,
+   361→          walls,
+   362→          trims,
+   363→          windows,
+   364→          doorPanels,
+   365→          cfg,
+   366→          isStaircase,
+   367→        );
+   368→      }
+   369→
+   370→      // Staircase steps.
+   371→      if (isStaircase) {
+   372→        addStairs(room, baseY, plotW, plotL, stairs);
+   373→      }
+   374→
+   375→      // Furniture.
+   376→      if (showFurniture && !isStaircase && !isOpenAir) {
+   377→        addFurniture(room, baseY, plotW, plotL, furniture);
+   378→      }
+   379→
+   380→      // Floating label.
+   381→      labels.push({
+   382→        position: [cx, baseY + wallHeight + 0.6, cz],
+   383→        text: room.name,
+   384→        subtext: `${room.width.toFixed(1)}\u00A0\u00D7\u00A0${room.length.toFixed(1)}\u00A0ft`,
+   385→        color: catalog?.accent ?? '#2b4a7a',
+   386→      });
+   387→    });
+   388→
+   389→    // Inter-floor slab (only between this floor and the next).
+   390→    if (showAllFloors && idx < floorsRendered.length - 1 && fMinX < Infinity) {
+   391→      const slabY = baseY + wallHeight + cfg.slabThickness / 2;
+   392→      interFloorSlabs.push({
+   393→        position: [(fMinX + fMaxX) / 2, slabY, (fMinZ + fMaxZ) / 2],
+   394→        size: [fMaxX - fMinX, fMaxZ - fMinZ],
+   395→        color: cfg.slabColor,
+   396→      });
+   397→    }
+   398→  });
+   399→
+   400→  const footprint: Footprint | null =
+   401→    minX < Infinity ? { minX, maxX, minZ, maxZ } : null;
+   402→  const lastBaseY = floorBaseYs[floorBaseYs.length - 1] ?? 0;
+   403→  const totalBuildingHeight = lastBaseY + wallHeight;
+   404→  const roofY = lastBaseY + wallHeight + 0.15;
+   405→
+   406→  return {
+   407→    floorSlabs,
+   408→    interFloorSlabs,
+   409→    walls,
+   410→    trims,
+   411→    windows,
+   412→    doorPanels,
+   413→    stairs,
+   414→    furniture,
+   415→    labels,
+   416→    footprint,
+   417→    totalBuildingHeight,
+   418→    roofY,
+   419→  };
+   420→}
+   421→
+   422→// -------------------------------------------------------------------------
+   423→// Wall builder — emits thin shell segments around each room perimeter,
+   424→// leaving gaps for doors. Windows are rendered as translucent overlays.
+   425→// -------------------------------------------------------------------------
+   426→
+   427→function addRoomWalls(
+   428→  room: RoomRect,
+   429→  baseY: number,
+   430→  wallHeight: number,
+   431→  plotW: number,
+   432→  plotL: number,
+   433→  walls: BoxData[],
+   434→  trims: BoxData[],
+   435→  windows: BoxData[],
+   436→  doorPanels: BoxData[],
+   437→  cfg: StyleConfig,
+   438→  isStaircase: boolean,
+   439→) {
+   440→  const wallCenterY = baseY + wallHeight / 2;
+   441→  // Staircase rooms have a half-height balustrade instead of a full wall on
+   442→  // the open side, but to keep things simple we render full walls and let
+   443→  // the steps read visually.
+   444→  void isStaircase;
+   445→
+   446→  // ---- TOP wall: along X, at z = to3DZ(room.y) ----
+   447→  buildAxisWall({
+   448→    axis: 'x',
+   449→    fixedCoord: to3DZ(room.y, plotL),
+   450→    startCoord: to3DX(room.x, plotW),
+   451→    length: room.width,
+   452→    doors: doorsOn(room, 'top'),
+   453→    wins: windowsOn(room, 'top'),
+   454→    baseY,
+   455→    wallHeight,
+   456→    wallCenterY,
+   457→    walls,
+   458→    trims,
+   459→    windows,
+   460→    doorPanels,
+   461→    cfg,
+   462→  });
+   463→
+   464→  // ---- BOTTOM wall: along X, at z = to3DZ(room.y + room.length) ----
+   465→  buildAxisWall({
+   466→    axis: 'x',
+   467→    fixedCoord: to3DZ(room.y + room.length, plotL),
+   468→    startCoord: to3DX(room.x, plotW),
+   469→    length: room.width,
+   470→    doors: doorsOn(room, 'bottom'),
+   471→    wins: windowsOn(room, 'bottom'),
+   472→    baseY,
+   473→    wallHeight,
+   474→    wallCenterY,
+   475→    walls,
+   476→    trims,
+   477→    windows,
+   478→    doorPanels,
+   479→    cfg,
+   480→  });
+   481→
+   482→  // ---- LEFT wall: along Z, at x = to3DX(room.x) ----
+   483→  buildAxisWall({
+   484→    axis: 'z',
+   485→    fixedCoord: to3DX(room.x, plotW),
+   486→    startCoord: to3DZ(room.y, plotL),
+   487→    length: room.length,
+   488→    doors: doorsOn(room, 'left'),
+   489→    wins: windowsOn(room, 'left'),
+   490→    baseY,
+   491→    wallHeight,
+   492→    wallCenterY,
+   493→    walls,
+   494→    trims,
+   495→    windows,
+   496→    doorPanels,
+   497→    cfg,
+   498→  });
+   499→
+   500→  // ---- RIGHT wall: along Z, at x = to3DX(room.x + room.width) ----
+   501→  buildAxisWall({
+   502→    axis: 'z',
+   503→    fixedCoord: to3DX(room.x + room.width, plotW),
+   504→    startCoord: to3DZ(room.y, plotL),
+   505→    length: room.length,
+   506→    doors: doorsOn(room, 'right'),
+   507→    wins: windowsOn(room, 'right'),
+   508→    baseY,
+   509→    wallHeight,
+   510→    wallCenterY,
+   511→    walls,
+   512→    trims,
+   513→    windows,
+   514→    doorPanels,
+   515→    cfg,
+   516→  });
+   517→}
+   518→
+   519→interface AxisWallArgs {
+   520→  axis: 'x' | 'z';
+   521→  fixedCoord: number;
+   522→  startCoord: number;
+   523→  length: number;
+   524→  doors: DoorMarker[];
+   525→  wins: WindowMarker[];
+   526→  baseY: number;
+   527→  wallHeight: number;
+   528→  wallCenterY: number;
+   529→  walls: BoxData[];
+   530→  trims: BoxData[];
+   531→  windows: BoxData[];
+   532→  doorPanels: BoxData[];
+   533→  cfg: StyleConfig;
+   534→}
+   535→
+   536→function buildAxisWall(a: AxisWallArgs) {
+   537→  const segments = splitWallByOpenings(
+   538→    a.length,
+   539→    a.doors.map((d) => ({ pos: d.pos, width: d.width })),
+   540→  );
+   541→  const isX = a.axis === 'x';
+   542→
+   543→  for (const seg of segments) {
+   544→    const segStartWorld = a.startCoord + seg.start;
+   545→    const segEndWorld = a.startCoord + seg.end;
+   546→    const center = (segStartWorld + segEndWorld) / 2;
+   547→    const span = segEndWorld - segStartWorld;
+   548→    if (span <= 0.05) continue;
+   549→
+   550→    if (isX) {
+   551→      a.walls.push({
+   552→        position: [center, a.wallCenterY, a.fixedCoord],
+   553→        size: [span, a.wallHeight, WALL_THICKNESS],
+   554→      });
+   555→      // Top accent trim
+   556→      if (a.cfg.accentTrim) {
+   557→        a.trims.push({
+   558→          position: [center, a.baseY + a.wallHeight + 0.1, a.fixedCoord],
+   559→          size: [span, 0.2, WALL_THICKNESS * 1.05],
+   560→        });
+   561→      }
+   562→    } else {
+   563→      a.walls.push({
+   564→        position: [a.fixedCoord, a.wallCenterY, center],
+   565→        size: [WALL_THICKNESS, a.wallHeight, span],
+   566→      });
+   567→      if (a.cfg.accentTrim) {
+   568→        a.trims.push({
+   569→          position: [a.fixedCoord, a.baseY + a.wallHeight + 0.1, center],
+   570→          size: [WALL_THICKNESS * 1.05, 0.2, span],
+   571→        });
+   572→      }
+   573→    }
+   574→  }
+   575→
+   576→  // Windows (translucent overlays on the wall surface).
+   577→  for (const win of a.wins) {
+   578→    const wWidth = Math.min(win.width * a.cfg.windowScale, a.length * 0.7);
+   579→    const center = a.startCoord + win.pos * a.length;
+   580→    const winHeight = WINDOW_BASE_HEIGHT * a.cfg.windowScale;
+   581→    const winY = a.baseY + WINDOW_BOTTOM + winHeight / 2;
+   582→    const thick = WALL_THICKNESS * 1.5;
+   583→    if (isX) {
+   584→      a.windows.push({
+   585→        position: [center, winY, a.fixedCoord],
+   586→        size: [wWidth, winHeight, thick],
+   587→      });
+   588→    } else {
+   589→      a.windows.push({
+   590→        position: [a.fixedCoord, winY, center],
+   591→        size: [thick, winHeight, wWidth],
+   592→      });
+   593→    }
+   594→  }
+   595→
+   596→  // Door panels (thin door leaf at the door position).
+   597→  for (const d of a.doors) {
+   598→    const center = a.startCoord + d.pos * a.length;
+   599→    const panelThick = WALL_THICKNESS * 0.55;
+   600→    if (isX) {
+   601→      a.doorPanels.push({
+   602→        position: [center, a.baseY + DOOR_HEIGHT / 2, a.fixedCoord],
+   603→        size: [d.width * 0.92, DOOR_HEIGHT, panelThick],
+   604→      });
+   605→    } else {
+   606→      a.doorPanels.push({
+   607→        position: [a.fixedCoord, a.baseY + DOOR_HEIGHT / 2, center],
+   608→        size: [panelThick, DOOR_HEIGHT, d.width * 0.92],
+   609→      });
+   610→    }
+   611→  }
+   612→}
+   613→
+   614→// -------------------------------------------------------------------------
+   615→// Stairs — a flight of ascending steps rising half the wall height.
+   616→// -------------------------------------------------------------------------
+   617→
+   618→function addStairs(
+   619→  room: RoomRect,
+   620→  baseY: number,
+   621→  plotW: number,
+   622→  plotL: number,
+   623→  stairs: BoxData[],
+   624→) {
+   625→  const cx = to3DX(room.x + room.width / 2, plotW);
+   626→  const cz = to3DZ(room.y + room.length / 2, plotL);
+   627→  const stepCount = 7;
+   628→  const stepHeight = 0.55;
+   629→  const stepDepth = room.length / stepCount;
+   630→  const stepWidth = Math.min(room.width * 0.7, 4);
+   631→  const startZ = cz - room.length / 2 + stepDepth / 2;
+   632→  for (let i = 0; i < stepCount; i++) {
+   633→    stairs.push({
+   634→      position: [cx, baseY + (stepHeight * (i + 1)) / 2, startZ + i * stepDepth],
+   635→      size: [stepWidth, stepHeight * (i + 1), stepDepth * 0.95],
+   636→    });
+   637→  }
+   638→}
+   639→
+   640→// -------------------------------------------------------------------------
+   641→// Furniture — minimal box proxies to suggest room function.
+   642→// -------------------------------------------------------------------------
+   643→
+   644→function addFurniture(
+   645→  room: RoomRect,
+   646→  baseY: number,
+   647→  plotW: number,
+   648→  plotL: number,
+   649→  furniture: BoxData[],
+   650→) {
+   651→  const cx = to3DX(room.x + room.width / 2, plotW);
+   652→  const cz = to3DZ(room.y + room.length / 2, plotL);
+   653→  const w = room.width;
+   654→  const l = room.length;
+   655→
+   656→  switch (room.type) {
+   657→    case 'bedroom': {
+   658→      const bedW = Math.min(w * 0.55, 6);
+   659→      const bedL = Math.min(l * 0.5, 7);
+   660→      const bedX = to3DX(room.x + bedW / 2 + 0.5, plotW);
+   661→      const bedZ = to3DZ(room.y + l - bedL / 2 - 0.5, plotL);
+   662→      furniture.push({
+   663→        position: [bedX, baseY + 1, bedZ],
+   664→        size: [bedW, 2, bedL],
+   665→      });
+   666→      // Wardrobe
+   667→      furniture.push({
+   668→        position: [to3DX(room.x + 1, plotW), baseY + 3, to3DZ(room.y + 1.5, plotL)],
+   669→        size: [1.5, 6, 3],
+   670→      });
+   671→      break;
+   672→    }
+   673→    case 'living': {
+   674→      const sofaW = Math.min(w * 0.7, 8);
+   675→      furniture.push({
+   676→        position: [cx, baseY + 1, to3DZ(room.y + l - 1.5, plotL)],
+   677→        size: [sofaW, 1.8, 2.5],
+   678→      });
+   679→      // Coffee table
+   680→      furniture.push({
+   681→        position: [cx, baseY + 0.7, cz],
+   682→        size: [3.5, 1.4, 2],
+   683→      });
+   684→      // TV unit
+   685→      furniture.push({
+   686→        position: [to3DX(room.x + 1, plotW), baseY + 2, cz],
+   687→        size: [1, 4, Math.min(l * 0.6, 6)],
+   688→      });
+   689→      break;
+   690→    }
+   691→    case 'dining': {
+   692→      const tW = Math.min(w * 0.5, 4);
+   693→      const tL = Math.min(l * 0.4, 6);
+   694→      furniture.push({
+   695→        position: [cx, baseY + 1.5, cz],
+   696→        size: [tW, 3, tL],
+   697→      });
+   698→      // Four chairs
+   699→      const chairPositions: [number, number][] = [
+   700→        [cx, cz - tL / 2 - 1],
+   701→        [cx, cz + tL / 2 + 1],
+   702→        [cx - tW / 2 - 1, cz],
+   703→        [cx + tW / 2 + 1, cz],
+   704→      ];
+   705→      for (const [px, pz] of chairPositions) {
+   706→        furniture.push({
+   707→          position: [px, baseY + 1, pz],
+   708→          size: [1.4, 2, 1.4],
+   709→        });
+   710→      }
+   711→      break;
+   712→    }
+   713→    case 'kitchen': {
+   714→      // Counter along left wall
+   715→      const counterL = Math.min(l * 0.85, l - 1);
+   716→      furniture.push({
+   717→        position: [to3DX(room.x + 1, plotW), baseY + 1.5, cz],
+   718→        size: [1.5, 3, counterL],
+   719→      });
+   720→      // Island
+   721→      if (w > 9) {
+   722→        furniture.push({
+   723→          position: [cx + 1.5, baseY + 1.5, cz],
+   724→          size: [3, 3, Math.min(l * 0.5, 4)],
+   725→        });
+   726→      }
+   727→      break;
+   728→    }
+   729→    case 'office': {
+   730→      furniture.push({
+   731→        position: [to3DX(room.x + 1.5, plotW), baseY + 1.3, to3DZ(room.y + 1.5, plotL)],
+   732→        size: [3.5, 2.6, 2],
+   733→      });
+   734→      // Chair
+   735→      furniture.push({
+   736→        position: [to3DX(room.x + 1.5, plotW), baseY + 1, to3DZ(room.y + 3.5, plotL)],
+   737→        size: [1.5, 2, 1.5],
+   738→      });
+   739→      break;
+   740→    }
+   741→    case 'bathroom': {
+   742→      // Sink
+   743→      furniture.push({
+   744→        position: [cx - w * 0.2, baseY + 1.5, to3DZ(room.y + 1, plotL)],
+   745→        size: [1.5, 3, 1.2],
+   746→      });
+   747→      // Toilet
+   748→      furniture.push({
+   749→        position: [cx + w * 0.25, baseY + 0.8, to3DZ(room.y + 1, plotL)],
+   750→        size: [1.2, 1.6, 1.6],
+   751→      });
+   752→      break;
+   753→    }
+   754→    case 'pooja': {
+   755→      furniture.push({
+   756→        position: [cx, baseY + 1.5, to3DZ(room.y + 0.8, plotL)],
+   757→        size: [w * 0.6, 3, 0.8],
+   758→      });
+   759→      break;
+   760→    }
+   761→    case 'utility': {
+   762→      furniture.push({
+   763→        position: [to3DX(room.x + 1, plotW), baseY + 1.5, cz],
+   764→        size: [1.5, 3, Math.min(l * 0.7, 4)],
+   765→      });
+   766→      break;
+   767→    }
+   768→    case 'store': {
+   769→      furniture.push({
+   770→        position: [to3DX(room.x + 1, plotW), baseY + 2, cz],
+   771→        size: [1.5, 4, Math.min(l * 0.7, 3)],
+   772→      });
+   773→      break;
+   774→    }
+   775→    case 'foyer': {
+   776→      // Small console table
+   777→      furniture.push({
+   778→        position: [cx, baseY + 1.2, to3DZ(room.y + 1, plotL)],
+   779→        size: [Math.min(w * 0.6, 3), 2.4, 0.8],
+   780→      });
+   781→      break;
+   782→    }
+   783→    default:
+   784→      break;
+   785→  }
+   786→}
+   787→
+   788→// =========================================================================
+   789→// React components
+   790→// =========================================================================
+   791→
+   792→function Roof({
+   793→  footprint,
+   794→  y,
+   795→  style,
+   796→  accentColor,
+   797→}: {
+   798→  footprint: Footprint;
+   799→  y: number;
+   800→  style: DesignStyle;
+   801→  accentColor: string;
+   802→}) {
+   803→  const cfg = STYLE_CONFIG[style];
+   804→  const width = footprint.maxX - footprint.minX;
+   805→  const depth = footprint.maxZ - footprint.minZ;
+   806→  const cx = (footprint.minX + footprint.maxX) / 2;
+   807→  const cz = (footprint.minZ + footprint.maxZ) / 2;
+   808→  const overhang = cfg.roofOverhang;
+   809→  const opacity = cfg.roofOpacity;
+   810→
+   811→  const pitchedGeom = useMemo(() => {
+   812→    if (cfg.roofType !== 'pitched') return null;
+   813→    const base = width + overhang * 2;
+   814→    const apex = Math.min(width, depth) * 0.4;
+   815→    const shape = new THREE.Shape();
+   816→    shape.moveTo(-base / 2, 0);
+   817→    shape.lineTo(base / 2, 0);
+   818→    shape.lineTo(0, apex);
+   819→    shape.closePath();
+   820→    const extrudeDepth = depth + overhang * 2;
+   821→    const g = new THREE.ExtrudeGeometry(shape, {
+   822→      depth: extrudeDepth,
+   823→      bevelEnabled: false,
+   824→    });
+   825→    g.translate(0, 0, -extrudeDepth / 2);
+   826→    g.computeVertexNormals();
+   827→    return g;
+   828→  }, [cfg.roofType, width, depth, overhang]);
+   829→
+   830→  if (cfg.roofType === 'pitched' && pitchedGeom) {
+   831→    return (
+   832→      <mesh geometry={pitchedGeom} position={[cx, y, cz]} castShadow receiveShadow>
+   833→        <meshStandardMaterial
+   834→          color={accentColor}
+   835→          transparent
+   836→          opacity={opacity}
+   837→          roughness={0.7}
+   838→          side={THREE.DoubleSide}
+   839→        />
+   840→      </mesh>
+   841→    );
+   842→  }
+   843→
+   844→  // Flat or overhang roof — thin slab.
+   845→  return (
+   846→    <mesh position={[cx, y, cz]} castShadow receiveShadow>
+   847→      <boxGeometry args={[width + overhang * 2, 0.3, depth + overhang * 2]} />
+   848→      <meshStandardMaterial
+   849→        color={accentColor}
+   850→        transparent
+   851→        opacity={opacity}
+   852→        roughness={0.6}
+   853→      />
+   854→    </mesh>
+   855→  );
+   856→}
+   857→
+   858→function Label3D({ label }: { label: LabelData }) {
+   859→  return (
+   860→    <Html
+   861→      position={label.position}
+   862→      center
+   863→      distanceFactor={28}
+   864→      zIndexRange={[10, 0]}
+   865→      wrapperClass="ob-label"
+   866→      style={{ pointerEvents: 'none' }}
+   867→    >
+   868→      <div
+   869→        style={{
+   870→          pointerEvents: 'none',
+   871→          userSelect: 'none',
+   872→          padding: '3px 8px',
+   873→          background: 'rgba(255,255,255,0.92)',
+   874→          border: `1.5px solid ${label.color}`,
+   875→          borderRadius: '6px',
+   876→          fontFamily:
+   877→            'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+   878→          fontSize: '12px',
+   879→          fontWeight: 700,
+   880→          color: label.color,
+   881→          whiteSpace: 'nowrap',
+   882→          boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+   883→          textAlign: 'center',
+   884→          transform: 'translate3d(-50%, -50%, 0)',
+   885→        }}
+   886→      >
+   887→        <div>{label.text}</div>
+   888→        <div
+   889→          style={{
+   890→            fontSize: '10px',
+   891→            fontWeight: 500,
+   892→            color: '#52525b',
+   893→            marginTop: '1px',
+   894→            fontVariantNumeric: 'tabular-nums',
+   895→          }}
+   896→        >
+   897→          {label.subtext}
+   898→        </div>
+   899→      </div>
+   900→    </Html>
+   901→  );
+   902→}
+   903→
+   904→function Building({
+   905→  scene,
+   906→  style,
+   907→  accentColor,
+   908→  showLabels,
+   909→}: {
+   910→  scene: ComputedScene;
+   911→  style: DesignStyle;
+   912→  accentColor: string;
+   913→  showLabels: boolean;
+   914→}) {
+   915→  const cfg = STYLE_CONFIG[style];
+   916→  return (
+   917→    <group>
+   918→      {/* Per-room floor slabs */}
+   919→      {scene.floorSlabs.map((s, i) => (
+   920→        <mesh
+   921→          key={`fs-${i}`}
+   922→          position={s.position}
+   923→          rotation={[-Math.PI / 2, 0, 0]}
+   924→          receiveShadow
+   925→        >
+   926→          <planeGeometry args={[s.size[0], s.size[1]]} />
+   927→          <meshStandardMaterial
+   928→            color={s.color}
+   929→            roughness={0.85}
+   930→            side={THREE.DoubleSide}
+   931→          />
+   932→        </mesh>
+   933→      ))}
+   934→
+   935→      {/* Inter-floor ceiling slabs (multi-floor mode) */}
+   936→      {scene.interFloorSlabs.map((s, i) => (
+   937→        <mesh
+   938→          key={`is-${i}`}
+   939→          position={s.position}
+   940→          castShadow
+   941→          receiveShadow
+   942→        >
+   943→          <boxGeometry args={[s.size[0], cfg.slabThickness, s.size[1]]} />
+   944→          <meshStandardMaterial color={s.color} roughness={0.85} />
+   945→        </mesh>
+   946→      ))}
+   947→
+   948→      {/* Walls (thin shells) */}
+   949→      {scene.walls.map((w, i) => (
+   950→        <mesh key={`w-${i}`} position={w.position} castShadow receiveShadow>
+   951→          <boxGeometry args={w.size} />
+   952→          <meshStandardMaterial
+   953→            color={cfg.wallColor}
+   954→            roughness={cfg.wallRoughness}
+   955→          />
+   956→        </mesh>
+   957→      ))}
+   958→
+   959→      {/* Accent trims */}
+   960→      {scene.trims.map((t, i) => (
+   961→        <mesh key={`t-${i}`} position={t.position}>
+   962→          <boxGeometry args={t.size} />
+   963→          <meshStandardMaterial color={cfg.trimColor} roughness={0.5} />
+   964→        </mesh>
+   965→      ))}
+   966→
+   967→      {/* Windows (translucent overlays) */}
+   968→      {scene.windows.map((w, i) => (
+   969→        <mesh key={`win-${i}`} position={w.position}>
+   970→          <boxGeometry args={w.size} />
+   971→          <meshStandardMaterial
+   972→            color={cfg.windowTint}
+   973→            transparent
+   974→            opacity={cfg.windowOpacity}
+   975→            roughness={0.1}
+   976→            metalness={0.35}
+   977→          />
+   978→        </mesh>
+   979→      ))}
+   980→
+   981→      {/* Door panels */}
+   982→      {scene.doorPanels.map((d, i) => (
+   983→        <mesh key={`dp-${i}`} position={d.position} castShadow>
+   984→          <boxGeometry args={d.size} />
+   985→          <meshStandardMaterial color={cfg.trimColor} roughness={0.55} />
+   986→        </mesh>
+   987→      ))}
+   988→
+   989→      {/* Staircase steps */}
+   990→      {scene.stairs.map((s, i) => (
+   991→        <mesh key={`st-${i}`} position={s.position} castShadow receiveShadow>
+   992→          <boxGeometry args={s.size} />
+   993→          <meshStandardMaterial color={cfg.stairColor} roughness={0.85} />
+   994→        </mesh>
+   995→      ))}
+   996→
+   997→      {/* Furniture */}
+   998→      {scene.furniture.map((f, i) => (
+   999→        <mesh key={`fn-${i}`} position={f.position} castShadow receiveShadow>
+  1000→          <boxGeometry args={f.size} />
+  1001→          <meshStandardMaterial color={cfg.furnitureColor} roughness={0.75} />
+  1002→        </mesh>
+  1003→      ))}
+  1004→
+  1005→      {/* Roof */}
+  1006→      {scene.footprint && (
+  1007→        <Roof
+  1008→          footprint={scene.footprint}
+  1009→          y={scene.roofY}
+  1010→          style={style}
+  1011→          accentColor={accentColor}
+  1012→        />
+  1013→      )}
+  1014→
+  1015→      {/* Floating labels */}
+  1016→      {showLabels &&
+  1017→        scene.labels.map((l, i) => <Label3D key={`lb-${i}`} label={l} />)}
+  1018→    </group>
+  1019→  );
+  1020→}
+  1021→
+  1022→// -------------------------------------------------------------------------
+  1023→// North arrow — flat disc with an arrow rotated to the plot's north bearing.
+  1024→// -------------------------------------------------------------------------
+  1025→
+  1026→function NorthArrow({
+  1027→  plotWidth,
+  1028→  plotLength,
+  1029→  northDirection,
+  1030→}: {
+  1031→  plotWidth: number;
+  1032→  plotLength: number;
+  1033→  northDirection: number;
+  1034→}) {
+  1035→  const px = -plotWidth / 2 + 2.5;
+  1036→  const pz = -plotLength / 2 + 2.5;
+  1037→  const angle = (northDirection * Math.PI) / 180;
+  1038→  // 2D north (0 = up) maps to 3D direction (sin θ, 0, -cos θ).
+  1039→  // Y-rotation that orients the local +X axis toward that direction:
+  1040→  //   θ_rot = atan2(cos θ, sin θ)
+  1041→  const yRotation = Math.atan2(Math.cos(angle), Math.sin(angle));
+  1042→  const labelX = Math.sin(angle) * 2.6;
+  1043→  const labelZ = -Math.cos(angle) * 2.6;
+  1044→
+  1045→  return (
+  1046→    <group position={[px, 0, pz]}>
+  1047→      {/* Disc base */}
+  1048→      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]} receiveShadow>
+  1049→        <circleGeometry args={[1.9, 28]} />
+  1050→        <meshStandardMaterial color="#ffffff" roughness={0.85} />
+  1051→      </mesh>
+  1052→      {/* Arrow */}
+  1053→      <group position={[0, 0.08, 0]} rotation={[0, yRotation, 0]}>
+  1054→        <mesh position={[1.1, 0, 0]} rotation={[0, 0, -Math.PI / 2]} castShadow>
+  1055→          <coneGeometry args={[0.42, 1.3, 4]} />
+  1056→          <meshStandardMaterial color="#1e3a5f" roughness={0.5} />
+  1057→        </mesh>
+  1058→        <mesh position={[0.2, 0, 0]} rotation={[0, 0, -Math.PI / 2]} castShadow>
+  1059→          <cylinderGeometry args={[0.16, 0.16, 1.6, 8]} />
+  1060→          <meshStandardMaterial color="#1e3a5f" roughness={0.5} />
+  1061→        </mesh>
+  1062→      </group>
+  1063→      {/* N label */}
+  1064→      <Text
+  1065→        position={[labelX, 0.12, labelZ]}
+  1066→        rotation={[-Math.PI / 2, 0, 0]}
+  1067→        fontSize={0.95}
+  1068→        color="#1e3a5f"
+  1069→        anchorX="center"
+  1070→        anchorY="middle"
+  1071→        outlineWidth={0.02}
+  1072→        outlineColor="#ffffff"
+  1073→      >
+  1074→        N
+  1075→      </Text>
+  1076→    </group>
+  1077→  );
+  1078→}
+  1079→
+  1080→// -------------------------------------------------------------------------
+  1081→// Plot outline — a thin wireframe rectangle on the ground.
+  1082→// -------------------------------------------------------------------------
+  1083→
+  1084→function PlotOutline({
+  1085→  width,
+  1086→  length,
+  1087→}: {
+  1088→  width: number;
+  1089→  length: number;
+  1090→}) {
+  1091→  const geom = useMemo(() => {
+  1092→    const box = new THREE.BoxGeometry(width, 0.02, length);
+  1093→    const edges = new THREE.EdgesGeometry(box);
+  1094→    box.dispose();
+  1095→    return edges;
+  1096→  }, [width, length]);
+  1097→
+  1098→  return (
+  1099→    <lineSegments geometry={geom} position={[0, 0.03, 0]}>
+  1100→      <lineBasicMaterial color="#2b4a7a" transparent opacity={0.65} />
+  1101→    </lineSegments>
+  1102→  );
+  1103→}
+  1104→
+  1105→// -------------------------------------------------------------------------
+  1106→// 3D bounding-box wireframe above the building (subtle vertical extents).
+  1107→// -------------------------------------------------------------------------
+  1108→
+  1109→function BoundingBox({
+  1110→  footprint,
+  1111→  buildingHeight,
+  1112→}: {
+  1113→  footprint: Footprint | null;
+  1114→  buildingHeight: number;
+  1115→}) {
+  1116→  const geom = useMemo(() => {
+  1117→    if (!footprint) return null;
+  1118→    const w = footprint.maxX - footprint.minX;
+  1119→    const d = footprint.maxZ - footprint.minZ;
+  1120→    const cx = (footprint.minX + footprint.maxX) / 2;
+  1121→    const cz = (footprint.minZ + footprint.maxZ) / 2;
+  1122→    const box = new THREE.BoxGeometry(w + 0.4, buildingHeight + 0.4, d + 0.4);
+  1123→    const edges = new THREE.EdgesGeometry(box);
+  1124→    box.dispose();
+  1125→    const g = new THREE.BufferGeometry();
+  1126→    g.setAttribute('position', edges.getAttribute('position'));
+  1127→    g.setIndex(edges.getIndex());
+  1128→    edges.dispose();
+  1129→    return { geom: g, cx, cz };
+  1130→  }, [footprint, buildingHeight]);
+  1131→
+  1132→  if (!geom) return null;
+  1133→  return (
+  1134→    <lineSegments
+  1135→      geometry={geom.geom}
+  1136→      position={[geom.cx, buildingHeight / 2, geom.cz]}
+  1137→    >
+  1138→      <lineBasicMaterial color="#2b4a7a" transparent opacity={0.25} />
+  1139→    </lineSegments>
+  1140→  );
+  1141→}
+  1142→
+  1143→// =========================================================================
+  1144→// Camera rig — animates the camera (and OrbitControls target) when
+  1145→// `cameraView` changes. The animation auto-stops after a fixed number of
+  1146→// frames OR when the user starts interacting with the controls.
+  1147→// =========================================================================
+  1148→
+  1149→function CameraRig({
+  1150→  cameraView,
+  1151→  plotWidth,
+  1152→  plotLength,
+  1153→  buildingHeight,
+  1154→}: {
+  1155→  cameraView: 'orbit' | 'top' | 'front' | 'isometric';
+  1156→  plotWidth: number;
+  1157→  plotLength: number;
+  1158→  buildingHeight: number;
+  1159→}) {
+  1160→  const { camera, controls } = useThree();
+  1161→  const targetPos = useRef(new THREE.Vector3());
+  1162→  const targetLookAt = useRef(new THREE.Vector3(0, buildingHeight * 0.3, 0));
+  1163→  const animFrames = useRef(0);
+  1164→  const lerpFactor = 0.12;
+  1165→
+  1166→  // Recompute target whenever inputs change.
+  1167→  useEffect(() => {
+  1168→    const maxDim = Math.max(plotWidth, plotLength, 20);
+  1169→    const h = Math.max(buildingHeight, maxDim * 0.4);
+  1170→    switch (cameraView) {
+  1171→      case 'top':
+  1172→        targetPos.current.set(0.01, maxDim * 1.55, 0.01);
+  1173→        targetLookAt.current.set(0, 0, 0);
+  1174→        break;
+  1175→      case 'front':
+  1176→        targetPos.current.set(0, h * 0.55, maxDim * 1.25);
+  1177→        targetLookAt.current.set(0, h * 0.45, 0);
+  1178→        break;
+  1179→      case 'isometric':
+  1180→        targetPos.current.set(
+  1181→          maxDim * 0.95,
+  1182→          maxDim * 1.0,
+  1183→          maxDim * 0.95,
+  1184→        );
+  1185→        targetLookAt.current.set(0, h * 0.35, 0);
+  1186→        break;
+  1187→      case 'orbit':
+  1188→      default:
+  1189→        targetPos.current.set(
+  1190→          maxDim * 0.8,
+  1191→          h + maxDim * 0.45,
+  1192→          maxDim * 1.05,
+  1193→        );
+  1194→        targetLookAt.current.set(0, h * 0.3, 0);
+  1195→        break;
+  1196→    }
+  1197→    animFrames.current = 75; // ~1.25s of animation at 60fps
+  1198→  }, [cameraView, plotWidth, plotLength, buildingHeight]);
+  1199→
+  1200→  // Cancel animation when user starts dragging.
+  1201→  useEffect(() => {
+  1202→    const c = controls as { addEventListener?: (e: string, fn: () => void) => void; removeEventListener?: (e: string, fn: () => void) => void } | null;
+  1203→    if (!c || !c.addEventListener) return;
+  1204→    const onStart = () => {
+  1205→      animFrames.current = 0;
+  1206→    };
+  1207→    c.addEventListener('start', onStart);
+  1208→    return () => {
+  1209→      c.removeEventListener?.('start', onStart);
+  1210→    };
+  1211→  }, [controls]);
+  1212→
+  1213→  useFrame(() => {
+  1214→    if (animFrames.current <= 0) return;
+  1215→    animFrames.current -= 1;
+  1216→    camera.position.lerp(targetPos.current, lerpFactor);
+  1217→    const c = controls as { target?: THREE.Vector3; update?: () => void } | null;
+  1218→    if (c?.target && c?.update) {
+  1219→      c.target.lerp(targetLookAt.current, lerpFactor);
+  1220→      c.update();
+  1221→    } else {
+  1222→      camera.lookAt(targetLookAt.current);
+  1223→    }
+  1224→  });
+  1225→
+  1226→  return null;
+  1227→}
+  1228→
+  1229→// =========================================================================
+  1230→// Scene — lights, ground, grid, building, north arrow, contact shadows.
+  1231→// =========================================================================
+  1232→
+  1233→function Scene(props: Viewer3DProps) {
+  1234→  const {
+  1235→    layout,
+  1236→    floor,
+  1237→    showAllFloors,
+  1238→    accentColor,
+  1239→    style,
+  1240→    showWalls,
+  1241→    showFurniture,
+  1242→    showLabels,
+  1243→    cameraView,
+  1244→  } = props;
+  1245→
+  1246→  const plotW = layout.plot.width;
+  1247→  const plotL = layout.plot.length;
+  1248→
+  1249→  const scene = useMemo(
+  1250→    () =>
+  1251→      computeScene(
+  1252→        layout,
+  1253→        floor,
+  1254→        showAllFloors,
+  1255→        style,
+  1256→        showWalls,
+  1257→        showFurniture,
+  1258→      ),
+  1259→    [layout, floor, showAllFloors, style, showWalls, showFurniture],
+  1260→  );
+  1261→
+  1262→  const buildingHeight = Math.max(
+  1263→    scene.totalBuildingHeight,
+  1264→    STYLE_CONFIG[style].wallHeight,
+  1265→  );
+  1266→  const maxDim = Math.max(plotW, plotL, 20);
+  1267→
+  1268→  return (
+  1269→    <>
+  1270→      <color attach="background" args={['#eef0f3']} />
+  1271→      <fog
+  1272→        attach="fog"
+  1273→        args={['#eef0f3', maxDim * 2.2, maxDim * 5.5]}
+  1274→      />
+  1275→
+  1276→      {/* Lighting: soft architectural setup */}
+  1277→      <hemisphereLight args={['#ffffff', '#b5bcc4', 0.55]} />
+  1278→      <ambientLight intensity={0.28} />
+  1279→      <directionalLight
+  1280→        position={[plotW * 0.7, buildingHeight + 35, plotL * 0.55]}
+  1281→        intensity={1.05}
+  1282→        castShadow
+  1283→        shadow-mapSize-width={2048}
+  1284→        shadow-mapSize-height={2048}
+  1285→        shadow-camera-left={-maxDim}
+  1286→        shadow-camera-right={maxDim}
+  1287→        shadow-camera-top={maxDim}
+  1288→        shadow-camera-bottom={-maxDim}
+  1289→        shadow-camera-near={0.5}
+  1290→        shadow-camera-far={400}
+  1291→        shadow-bias={-0.0004}
+  1292→      />
+  1293→
+  1294→      <CameraRig
+  1295→        cameraView={cameraView}
+  1296→        plotWidth={plotW}
+  1297→        plotLength={plotL}
+  1298→        buildingHeight={buildingHeight}
+  1299→      />
+  1300→
+  1301→      {/* Building */}
+  1302→      <Building
+  1303→        scene={scene}
+  1304→        style={style}
+  1305→        accentColor={accentColor}
+  1306→        showLabels={showLabels}
+  1307→      />
+  1308→
+  1309→      {/* Plot ground plane */}
+  1310→      <mesh
+  1311→        rotation={[-Math.PI / 2, 0, 0]}
+  1312→        position={[0, 0, 0]}
+  1313→        receiveShadow
+  1314→      >
+  1315→        <planeGeometry args={[plotW, plotL]} />
+  1316→        <meshStandardMaterial color="#d4dcd0" roughness={0.95} />
+  1317→      </mesh>
+  1318→
+  1319→      {/* Subtle grid extending past the plot */}
+  1320→      <Grid
+  1321→        position={[0, 0.015, 0]}
+  1322→        args={[maxDim * 2.4, maxDim * 2.4]}
+  1323→        cellSize={2}
+  1324→        cellThickness={0.5}
+  1325→        cellColor="#9aa6b0"
+  1326→        sectionSize={10}
+  1327→        sectionThickness={1}
+  1328→        sectionColor="#475569"
+  1329→        fadeDistance={maxDim * 2.4}
+  1330→        fadeStrength={1}
+  1331→        followCamera={false}
+  1332→        infiniteGrid={false}
+  1333→      />
+  1334→
+  1335→      {/* Plot outline */}
+  1336→      <PlotOutline width={plotW} length={plotL} />
+  1337→
+  1338→      {/* Building bounding box wireframe */}
+  1339→      <BoundingBox
+  1340→        footprint={scene.footprint}
+  1341→        buildingHeight={buildingHeight}
+  1342→      />
+  1343→
+  1344→      {/* North arrow */}
+  1345→      <NorthArrow
+  1346→        plotWidth={plotW}
+  1347→        plotLength={plotL}
+  1348→        northDirection={layout.plot.northDirection}
+  1349→      />
+  1350→
+  1351→      {/* Soft contact shadow under the building */}
+  1352→      <ContactShadows
+  1353→        position={[0, 0.025, 0]}
+  1354→        scale={maxDim * 2}
+  1355→        far={buildingHeight + 12}
+  1356→        resolution={1024}
+  1357→        blur={2.5}
+  1358→        opacity={0.42}
+  1359→        color="#1a2433"
+  1360→      />
+  1361→
+  1362→      {/* A faint accent fill light so the accent color reads in shadows */}
+  1363→      <pointLight
+  1364→        position={[0, buildingHeight + 6, 0]}
+  1365→        intensity={0.15}
+  1366→        color={accentColor}
+  1367→        distance={maxDim * 2}
+  1368→      />
+  1369→
+  1370→      <OrbitControls
+  1371→        makeDefault
+  1372→        enableDamping
+  1373→        dampingFactor={0.08}
+  1374→        enablePan
+  1375→        enableRotate
+  1376→        enableZoom
+  1377→        minDistance={Math.max(8, maxDim * 0.15)}
+  1378→        maxDistance={maxDim * 4}
+  1379→        maxPolarAngle={Math.PI / 2.02}
+  1380→        screenSpacePanning={false}
+  1381→      />
+  1382→    </>
+  1383→  );
+  1384→}
+  1385→
+  1386→export default Viewer3D;
+  1387→

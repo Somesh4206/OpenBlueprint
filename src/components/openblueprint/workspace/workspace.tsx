@@ -68,6 +68,7 @@ import { ROOM_CATALOG } from '@/lib/room-catalog';
 import { cn } from '@/lib/utils';
 import { BlueprintCanvas } from './blueprint-canvas';
 import { AiAssistant } from './ai-assistant';
+import { FurnitureLibrary } from './furniture-library';
 import { ValidationPanel } from './panels';
 import { computeBuiltUpArea, estimateCost, formatINR } from '@/lib/cost/estimator';
 import { validateLayout } from '@/lib/layout/engine';
@@ -117,8 +118,9 @@ export function Workspace({ config, design, projectId }: Props) {
   const [showLabels, setShowLabels] = useState(true);
   const [showWalls3d, setShowWalls3d] = useState(true);
   const [showFurniture3d, setShowFurniture3d] = useState(true);
+  const [showFurniture2d, setShowFurniture2d] = useState(true);
   const [showLabels3d, setShowLabels3d] = useState(true);
-  const [cameraView, setCameraView] = useState<'orbit' | 'top' | 'front' | 'isometric'>('orbit');
+  const [cameraView, setCameraView] = useState<'orbit' | 'top' | 'front' | 'isometric'>('isometric');
   const [zoom, setZoom] = useState(1);
   const [projectName, setProjectName] = useState('My 30×40 Home');
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
@@ -133,6 +135,11 @@ export function Workspace({ config, design, projectId }: Props) {
   const setLayout = useApp((s) => s.setCurrentLayout);
   const selectedRoomId = useApp((s) => s.selectedRoomId);
   const setSelectedRoom = useApp((s) => s.setSelectedRoom);
+  const selectedFurnitureId = useApp((s) => s.selectedFurnitureId);
+  const setSelectedFurniture = useApp((s) => s.setSelectedFurniture);
+  const addFurniture = useApp((s) => s.addFurniture);
+  const updateFurniture = useApp((s) => s.updateFurniture);
+  const deleteFurniture = useApp((s) => s.deleteFurniture);
   const view2d = useApp((s) => s.view2d);
   const setView2d = useApp((s) => s.setView2d);
   const currentFloor = useApp((s) => s.currentFloor);
@@ -307,6 +314,13 @@ export function Workspace({ config, design, projectId }: Props) {
           </TooltipProvider>
         </aside>
 
+        {/* Furniture library (only in 2D mode) */}
+        {view2d && (
+          <div className="w-56 border-r border-border bg-card shrink-0 hidden md:flex flex-col">
+            <FurnitureLibrary />
+          </div>
+        )}
+
         {/* Center canvas area */}
         <main className="flex-1 flex flex-col min-w-0 bg-muted/20 relative">
           {/* sub-toolbar */}
@@ -317,6 +331,7 @@ export function Workspace({ config, design, projectId }: Props) {
                   <ToggleChip active={showGrid} onClick={() => setShowGrid(!showGrid)} icon={Grid2} label="Grid" />
                   <ToggleChip active={showDims} onClick={() => setShowDims(!showDims)} icon={Ruler} label="Dims" />
                   <ToggleChip active={showLabels} onClick={() => setShowLabels(!showLabels)} icon={Type} label="Labels" />
+                  <ToggleChip active={showFurniture2d} onClick={() => setShowFurniture2d(!showFurniture2d)} icon={Sofa} label="Furniture" />
                   <Separator orientation="vertical" className="h-5" />
                   <span className="text-xs text-muted-foreground hidden sm:inline">Floor:</span>
                   <FloorSelector floors={layout.floors} current={currentFloor} onChange={setCurrentFloor} showAll={showAllFloors} onShowAll={setShowAllFloors} />
@@ -350,15 +365,21 @@ export function Workspace({ config, design, projectId }: Props) {
                 config={config}
                 tool={tool}
                 selectedRoomId={selectedRoomId}
+                selectedFurnitureId={selectedFurnitureId}
                 onSelectRoom={setSelectedRoom}
+                onSelectFurniture={setSelectedFurniture}
                 onUpdateRoom={updateRoom}
                 onDeleteRoom={deleteRoom}
                 onAddRoom={addRoom}
+                onAddFurniture={addFurniture}
+                onUpdateFurniture={updateFurniture}
+                onDeleteFurniture={deleteFurniture}
                 currentFloor={currentFloor}
                 showAllFloors={showAllFloors}
                 showGrid={showGrid}
                 showDims={showDims}
                 showLabels={showLabels}
+                showFurniture={showFurniture2d}
                 zoom={zoom}
                 accentColor={accentColor}
                 validation={validation}
