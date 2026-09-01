@@ -185,7 +185,7 @@ function mkRoom(type: RoomType, name: string, x: number, y: number, w: number, l
     width: Math.round(w * 10) / 10,
     length: Math.round(l * 10) / 10,
     floor: 0,
-    doors: [{ wall: 'top', pos: 0.5, width: 3 }],
+    doors: [{ wall: 'top', pos: 0.5, width: 3, swing: 'in-right' as const }],
     windows: [],
   };
 }

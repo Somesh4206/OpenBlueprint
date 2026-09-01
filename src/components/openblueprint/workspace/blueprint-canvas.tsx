@@ -34,11 +34,13 @@ interface Props {
   validation: ValidationResult;
 }
 
-type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'furniture-move' | 'furniture-rotate' | 'furniture-resize' | null;
+type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'furniture-move' | 'furniture-rotate' | 'furniture-resize' | 'door-move' | null;
 
 interface DragState {
   roomId?: string;
   furnitureId?: string;
+  doorRoomId?: string;
+  doorIndex?: number;
   mode: DragMode;
   startMouse: { x: number; y: number };
   startRoom?: RoomRect;
@@ -131,7 +133,25 @@ export function BlueprintCanvas({
     }
     if (drag) return;
     const target = (e.target as Element);
-    // furniture hit-test first (furniture renders on top)
+    // door hit-test (doors on selected rooms are draggable)
+    const doorRoomId = target.getAttribute('data-door-room-id');
+    const doorIndexAttr = target.getAttribute('data-door-index');
+    if (doorRoomId && doorIndexAttr !== null) {
+      const di = parseInt(doorIndexAttr, 10);
+      const room = layout.rooms.find((r) => r.id === doorRoomId);
+      if (room && room.doors[di]) {
+        setDrag({
+          doorRoomId,
+          doorIndex: di,
+          mode: 'door-move',
+          startMouse: { x: e.clientX, y: e.clientY },
+          startRoom: { ...room },
+        });
+        (e.target as Element).setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    // furniture hit-test (furniture renders on top)
     const furnitureId = target.getAttribute('data-furniture-id');
     const furnitureHandle = target.getAttribute('data-furniture-handle');
     if (furnitureId) {
@@ -186,6 +206,24 @@ export function BlueprintCanvas({
     if (!drag) return;
     const dx = (e.clientX - drag.startMouse.x) / scale;
     const dy = (e.clientY - drag.startMouse.y) / scale;
+
+    // door drag — move door position along its wall
+    if (drag.mode === 'door-move' && drag.doorRoomId !== undefined && drag.doorIndex !== undefined && drag.startRoom) {
+      const room = drag.startRoom;
+      const door = room.doors[drag.doorIndex];
+      if (!door) return;
+      // convert pixel delta to position delta (0..1 along wall)
+      let newPos = door.pos;
+      if (door.wall === 'top' || door.wall === 'bottom') {
+        newPos = door.pos + dx / room.width;
+      } else {
+        newPos = door.pos + dy / room.length;
+      }
+      newPos = Math.max(0.05, Math.min(0.95, snap(newPos * 100) / 100));
+      const updatedDoors = room.doors.map((d, j) => j === drag.doorIndex ? { ...d, pos: newPos } : d);
+      onUpdateRoom(drag.doorRoomId, { doors: updatedDoors });
+      return;
+    }
 
     // furniture drag
     if (drag.mode === 'furniture-move' && drag.startFurniture) {
@@ -508,7 +546,7 @@ function RoomShape({
 
       {/* Doors */}
       {room.doors.map((d, i) => (
-        <DoorGraphic key={i} door={d} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} accent={accentColor} />
+        <DoorGraphic key={i} door={d} roomId={room.id} doorIndex={i} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} accent={accentColor} selected={selected} />
       ))}
       {/* Windows */}
       {room.windows.map((w, i) => (
@@ -550,33 +588,78 @@ function RoomShape({
   );
 }
 
-function DoorGraphic({ door, rx, ry, rw, rl, scale, accent }: { door: DoorMarker; rx: number; ry: number; rw: number; rl: number; scale: number; accent: string }) {
+function DoorGraphic({ door, roomId, doorIndex, rx, ry, rw, rl, scale, accent, selected }: { door: DoorMarker; roomId: string; doorIndex: number; rx: number; ry: number; rw: number; rl: number; scale: number; accent: string; selected: boolean }) {
   const dw = door.width * scale;
   let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-  let ax1 = 0, ay1 = 0, ax2 = 0, ay2 = 0;
+  // hinge point + arc endpoint depend on swing direction
+  let hx = 0, hy = 0, ax = 0, ay = 0;
+  let sweepFlag = 0; // 0 = ccw, 1 = cw
+  let largeArc = 0;
+
   switch (door.wall) {
     case 'top':
       x1 = rx + rw * door.pos - dw / 2; y1 = ry; x2 = x1 + dw; y2 = ry;
-      ax1 = x1; ay1 = ry; ax2 = x1; ay2 = ry + dw;
+      // hinge on left or right of door opening based on swing
+      if (door.swing === 'in-right' || door.swing === 'out-right') {
+        hx = x2; hy = ry; ax = x2; ay = ry + dw; sweepFlag = 0; // hinge right, swings in
+      } else {
+        hx = x1; hy = ry; ax = x1; ay = ry + dw; sweepFlag = 1; // hinge left, swings in
+      }
+      if (door.swing === 'out-right' || door.swing === 'out-left') { ay = ry - dw; }
       break;
     case 'bottom':
       x1 = rx + rw * door.pos - dw / 2; y1 = ry + rl; x2 = x1 + dw; y2 = ry + rl;
-      ax1 = x1; ay1 = ry + rl; ax2 = x1; ay2 = ry + rl - dw;
+      if (door.swing === 'in-right' || door.swing === 'out-right') {
+        hx = x2; hy = ry + rl; ax = x2; ay = ry + rl - dw; sweepFlag = 1;
+      } else {
+        hx = x1; hy = ry + rl; ax = x1; ay = ry + rl - dw; sweepFlag = 0;
+      }
+      if (door.swing === 'out-right' || door.swing === 'out-left') { ay = ry + rl + dw; }
       break;
     case 'left':
       x1 = rx; y1 = ry + rl * door.pos - dw / 2; x2 = rx; y2 = y1 + dw;
-      ax1 = rx; ay1 = y1; ax2 = rx + dw; ay2 = y1;
+      if (door.swing === 'in-right' || door.swing === 'out-right') {
+        hx = rx; hy = y2; ax = rx + dw; ay = y2; sweepFlag = 1;
+      } else {
+        hx = rx; hy = y1; ax = rx + dw; ay = y1; sweepFlag = 0;
+      }
+      if (door.swing === 'out-right' || door.swing === 'out-left') { ax = rx - dw; }
       break;
     case 'right':
       x1 = rx + rw; y1 = ry + rl * door.pos - dw / 2; x2 = rx + rw; y2 = y1 + dw;
-      ax1 = rx + rw; ay1 = y1; ax2 = rx + rw - dw; ay2 = y1;
+      if (door.swing === 'in-right' || door.swing === 'out-right') {
+        hx = rx + rw; hy = y2; ax = rx + rw - dw; ay = y2; sweepFlag = 0;
+      } else {
+        hx = rx + rw; hy = y1; ax = rx + rw - dw; ay = y1; sweepFlag = 1;
+      }
+      if (door.swing === 'out-right' || door.swing === 'out-left') { ax = rx + rw + dw; }
       break;
   }
   return (
-    <g pointerEvents="none">
-      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="white" strokeWidth={4} />
-      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={accent} strokeWidth={1.5} />
-      <path d={`M ${ax1} ${ay1} A ${dw} ${dw} 0 0 1 ${ax2} ${ay2}`} fill="none" stroke={accent} strokeWidth={1} opacity={0.6} />
+    <g>
+      {/* door gap (white erase) */}
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="white" strokeWidth={4} pointerEvents="none" />
+      {/* door panel line */}
+      <line x1={hx} y1={hy} x2={ax} y2={ay} stroke={accent} strokeWidth={1.8} pointerEvents="none" />
+      {/* swing arc */}
+      <path d={`M ${x1 === x2 ? ax : (hx === x1 ? x2 : x1)} ${y1 === y2 ? ay : (hy === y1 ? y2 : y1)} A ${dw} ${dw} 0 ${largeArc} ${sweepFlag} ${ax} ${ay}`} fill="none" stroke={accent} strokeWidth={0.8} opacity={0.5} pointerEvents="none" />
+      {/* draggable hit area — only visible when room is selected */}
+      {selected && (
+        <rect
+          data-door-room-id={roomId}
+          data-door-index={doorIndex}
+          x={Math.min(x1, x2) - 4}
+          y={Math.min(y1, y2) - 4}
+          width={Math.abs(x2 - x1) + 8}
+          height={Math.abs(y2 - y1) + 8}
+          fill={accent}
+          fillOpacity={0.15}
+          stroke={accent}
+          strokeWidth={1}
+          strokeDasharray="2 2"
+          style={{ cursor: 'ew-resize' }}
+        />
+      )}
     </g>
   );
 }

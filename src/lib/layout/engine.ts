@@ -227,15 +227,15 @@ function autoDoors(room: RoomRect, plot: PlotConfig, roadSide: PlotConfig['roadS
 
   if (isPublic && onBoundary) {
     const wall = roadWall(room, plot, roadSide);
-    if (wall) doors.push({ wall, pos: 0.5, width: 3.5 });
+    if (wall) doors.push({ wall, pos: 0.5, width: 3.5, swing: 'in-right' });
   } else {
     const wall = centerWall(room, plot);
-    if (wall) doors.push({ wall, pos: 0.5, width: 3 });
+    if (wall) doors.push({ wall, pos: 0.5, width: 3, swing: 'in-right' });
   }
   if (ROOM_CATALOG[room.type].group === 'private' || ROOM_CATALOG[room.type].group === 'service') {
     const wall = centerWall(room, plot);
     if (wall && !doors.some((d) => d.wall === wall)) {
-      doors.push({ wall, pos: 0.5, width: 2.8 });
+      doors.push({ wall, pos: 0.5, width: 2.8, swing: 'in-right' });
     }
   }
   return doors;
@@ -377,7 +377,7 @@ export function generateFloorLayout(
         width: round(parking.w),
         length: round(parking.h),
         floor,
-        doors: [{ wall: roadWallSide(parking, config.plot), pos: 0.5, width: 10 }],
+        doors: [{ wall: roadWallSide(parking, config.plot), pos: 0.5, width: 10, swing: 'in-right' as const }],
         windows: [],
       };
       out.push(pr);

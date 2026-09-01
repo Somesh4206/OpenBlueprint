@@ -319,6 +319,62 @@ function RoomToolPanel(props: Props) {
             <p className="text-[10px] text-muted-foreground">Use the Window tool to add/edit windows on walls.</p>
           </div>
 
+          {/* Split room — zig-zag flexibility to manage free spaces */}
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1.5 block">Split Room (Zig-Zag)</Label>
+            <p className="text-[10px] text-muted-foreground mb-2">Split this room into two parts to create L-shaped or T-shaped layouts and manage free spaces.</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1" disabled={selectedRoom.width < 10} onClick={() => {
+                // Split vertically (left/right)
+                const w2 = Math.round(selectedRoom.width / 2 * 2) / 2;
+                const layout2 = useApp.getState().currentLayout;
+                if (!layout2) return;
+                const newRoom: RoomRect = {
+                  id: `r${Date.now()}${Math.floor(Math.random() * 1000)}`,
+                  type: selectedRoom.type,
+                  name: `${selectedRoom.name} (Split)`,
+                  x: selectedRoom.x + w2,
+                  y: selectedRoom.y,
+                  width: selectedRoom.width - w2,
+                  length: selectedRoom.length,
+                  floor: selectedRoom.floor,
+                  doors: [{ wall: 'left' as const, pos: 0.5, width: 3, swing: 'in-right' as const }],
+                  windows: [],
+                };
+                useApp.getState().setCurrentLayout({
+                  ...layout2,
+                  rooms: layout2.rooms.map((r) => r.id === selectedRoom.id ? { ...r, width: w2 } : r).concat(newRoom),
+                });
+              }}>
+                <ArrowRightLeft className="size-3" /> Split ↕
+              </Button>
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1" disabled={selectedRoom.length < 10} onClick={() => {
+                // Split horizontally (top/bottom)
+                const l2 = Math.round(selectedRoom.length / 2 * 2) / 2;
+                const layout2 = useApp.getState().currentLayout;
+                if (!layout2) return;
+                const newRoom: RoomRect = {
+                  id: `r${Date.now()}${Math.floor(Math.random() * 1000)}`,
+                  type: selectedRoom.type,
+                  name: `${selectedRoom.name} (Split)`,
+                  x: selectedRoom.x,
+                  y: selectedRoom.y + l2,
+                  width: selectedRoom.width,
+                  length: selectedRoom.length - l2,
+                  floor: selectedRoom.floor,
+                  doors: [{ wall: 'top' as const, pos: 0.5, width: 3, swing: 'in-right' as const }],
+                  windows: [],
+                };
+                useApp.getState().setCurrentLayout({
+                  ...layout2,
+                  rooms: layout2.rooms.map((r) => r.id === selectedRoom.id ? { ...r, length: l2 } : r).concat(newRoom),
+                });
+              }}>
+                <ArrowRightLeft className="size-3" /> Split ↔
+              </Button>
+            </div>
+          </div>
+
           <Button size="sm" variant="destructive" className="w-full h-8 text-xs gap-1" onClick={() => onDeleteRoom(selectedRoom.id)}>
             <Trash2 className="size-3" /> Delete Room
           </Button>
@@ -344,25 +400,50 @@ function DoorToolPanel(props: Props) {
           {selectedRoom.doors.map((d, i) => (
             <div key={i} className="p-2 rounded border border-border space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium capitalize">{d.wall} wall · door {i + 1}</span>
+                <span className="text-xs font-medium capitalize">Door {i + 1}</span>
                 <Button size="icon" variant="ghost" className="size-6" onClick={() => onUpdateRoom(selectedRoom.id, { doors: selectedRoom.doors.filter((_, j) => j !== i) })}>
                   <Trash2 className="size-3" />
                 </Button>
               </div>
+              {/* Wall selector */}
+              <div>
+                <span className="text-[10px] text-muted-foreground mb-1 block">Wall</span>
+                <div className="grid grid-cols-4 gap-1">
+                  {(['top', 'right', 'bottom', 'left'] as const).map((w) => (
+                    <button key={w} onClick={() => onUpdateRoom(selectedRoom.id, { doors: selectedRoom.doors.map((dd, j) => j === i ? { ...dd, wall: w } : dd) })} className={cn('text-[10px] py-1 rounded border capitalize', d.wall === w ? 'border-primary bg-primary/5 text-primary font-medium' : 'border-border text-muted-foreground')}>{w}</button>
+                  ))}
+                </div>
+              </div>
+              {/* Position slider */}
               <div>
                 <div className="flex justify-between text-[10px] text-muted-foreground mb-1">
                   <span>Position along wall</span>
                   <span className="tech-num">{Math.round(d.pos * 100)}%</span>
                 </div>
-                <input type="range" min="0.1" max="0.9" step="0.05" value={d.pos} onChange={(e) => onUpdateRoom(selectedRoom.id, { doors: selectedRoom.doors.map((dd, j) => j === i ? { ...dd, pos: Number(e.target.value) } : dd) })} className="w-full" />
+                <input type="range" min="0.05" max="0.95" step="0.05" value={d.pos} onChange={(e) => onUpdateRoom(selectedRoom.id, { doors: selectedRoom.doors.map((dd, j) => j === i ? { ...dd, pos: Number(e.target.value) } : dd) })} className="w-full" />
               </div>
+              {/* Width */}
               <div>
                 <span className="text-[10px] text-muted-foreground">Width (ft)</span>
                 <Input type="number" step="0.5" min="2" value={d.width} onChange={(e) => onUpdateRoom(selectedRoom.id, { doors: selectedRoom.doors.map((dd, j) => j === i ? { ...dd, width: Number(e.target.value) } : dd) })} className="tech-num h-7 text-xs" />
               </div>
+              {/* Swing direction */}
+              <div>
+                <span className="text-[10px] text-muted-foreground mb-1 block">Swing direction</span>
+                <div className="grid grid-cols-2 gap-1">
+                  {([
+                    { v: 'in-left', l: '↺ In-Left' },
+                    { v: 'in-right', l: '↻ In-Right' },
+                    { v: 'out-left', l: '↺ Out-Left' },
+                    { v: 'out-right', l: '↻ Out-Right' },
+                  ] as const).map((s) => (
+                    <button key={s.v} onClick={() => onUpdateRoom(selectedRoom.id, { doors: selectedRoom.doors.map((dd, j) => j === i ? { ...dd, swing: s.v } : dd) })} className={cn('text-[10px] py-1.5 rounded border', d.swing === s.v ? 'border-primary bg-primary/5 text-primary font-medium' : 'border-border text-muted-foreground')}>{s.l}</button>
+                  ))}
+                </div>
+              </div>
             </div>
           ))}
-          <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1" onClick={() => onUpdateRoom(selectedRoom.id, { doors: [...selectedRoom.doors, { wall: 'top', pos: 0.5, width: 3 }] })}>
+          <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1" onClick={() => onUpdateRoom(selectedRoom.id, { doors: [...selectedRoom.doors, { wall: 'top' as const, pos: 0.5, width: 3, swing: 'in-right' as const }] })}>
             <Plus className="size-3" /> Add Door
           </Button>
         </div>

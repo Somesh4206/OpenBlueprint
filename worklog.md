@@ -420,3 +420,53 @@ Stage Summary:
 - Furniture fully editable: move, rotate (3 methods), resize (2 methods), delete
 - Zone allocation fixed for all zone combinations (public+private, public+service, private+service, single zone)
 - 0 overlaps across all tested configurations (1/2/3 floors, 9-17 rooms)
+
+---
+Task ID: 5-c
+Agent: 3d-car-bike-rebuild
+Task: Rebuild 3D car and bike as realistic animated models
+
+Work Log:
+- Read worklog.md, the helper-API section of furniture-3d.tsx (Box/Cyl/Sph/Cone signatures, ModelProps, darkenHex, 'use client' directive), the current CarModel/BikeModel blocky proxies, and the Task-5-b agent-ctx record to confirm the viewer wraps each FurnitureMesh3D in a `<group position={[0, worldY, 0]}>` so model-local origin sits on the floor with +Y up.
+- Added 3 imports to the top of furniture-3d.tsx: `useRef` (react), `useFrame` (@react-three/fiber), `* as THREE` (three) — required for the animation refs and `THREE.Group` type.
+- Rewrote CarModel (top-down, length along Z, +Z = front). 23 meshes total: tapered lower chassis box + slightly narrower/shorter hood + trunk (metallic paint, `roughness 0.3 / metalness 0.6`, body color + `darkenHex(body,0.18)` two-tone); narrower raised cabin/roof; slanted front & rear windshields (thin dark-glass boxes rotated ±0.5 rad around X, `#1a2a3a, roughness 0.05, metalness 0.3, opacity 0.7`); side-window slabs; chrome side mirrors; dark front grille; 2 emissive warm-white headlight boxes (`#fff8d0`/`#ffe08a` emissive, intensity 0.6); 2 emissive red taillight boxes (`#5a1010`/`#cc2020`, intensity 0.4); 4 wheels (radius 0.55, height 0.5) — each a dark tire `Cyl` (axle along X via `rotation=[0,0,π/2]`, `#1a1a1a, roughness 0.85, radialSegments 22`) + lighter hub `Cyl` (`#888, metalness 0.7`, slightly proud of tire). Animation: wrapping `<group ref={bodyRef}>` carries chassis + cabin + glass + mirrors + grille + lights; `useFrame` sets `position.y = sin(t*2) * 0.1` (±0.1ft bob per spec) and a subtle `rotation.z = sin(t*2 + 0.4) * 0.012` roll. Wheels are placed outside bodyRef so they stay grounded (suspension look).
+- Rewrote BikeModel (top-down, length along Z, +Z = front). 22 meshes total: narrow metallic frame box along Z (color prop, `roughness 0.4 / metalness 0.5`); darker engine block under the tank (`#333, roughness 0.6`); raised fuel tank (`darkenHex(color,0.25), metalness 0.6`) with a half-buried cylinder (`rotation=[π/2,0,0]`, axis along Z, `radius=w*0.25`, `height=l*0.22`) on top to give the curved tank silhouette; dark leather seat behind the tank (`#2a1a0a, roughness 0.7`); rear fender; handlebar across X + 2 darker grip cylinders; 2 tilted metallic front forks (`rotation=[-0.15,0,0]`, `#555, metalness 0.8`, length 1.7) visually connecting handlebar to front wheel hub; metallic-silver exhaust pipe along the right side (`#ccc, metalness 0.9, roughness 0.1`) + wider brighter tip; dark chrome headlight ring housing + bright emissive spherical headlight (`<mesh>`+`<sphereGeometry>`, `color/emissive #ffe08a, emissiveIntensity 0.7`); small emissive red tail-light box; 2 wheels (radius 0.55, height 0.15) — dark tire + lighter hub; front wheel also carries 2 cross-spokes (Boxes in the YZ plane) so the spin animation reads clearly. Animation: outer `<group ref={bodyRef}>` rolls gently (`rotation.z = sin(t*1.5) * 0.03`); inner `<group ref={frontWheelRef}>` (nested inside bodyRef at the front-wheel position) spins around its local X axis (`rotation.x = t * 2.5`) — that local X is the wheel's axle since the tire Cyl inside is rotated `[0,0,π/2]`.
+- Emissive materials (headlights/taillights/headlight bulb/tail-light) use raw `<mesh>`+`<boxGeometry>`/`<sphereGeometry>`+`<meshStandardMaterial emissive=…/>` because the file's Box/Cyl/Sph helpers don't expose emissive props. All emissive meshes have `castShadow`.
+- Verified with `bunx tsc --noEmit 2>&1 | grep furniture-3d` → no output (clean). Full `bunx tsc --noEmit` shows only `examples/` and `skills/` errors (explicitly out of scope). `bun run lint` → exit 0. dev.log shows `✓ Compiled in …` after the edit with no errors.
+
+Stage Summary:
+- Files changed: `src/components/openblueprint/workspace/furniture-3d.tsx` only — 3 import additions + full rewrite of `CarModel` and `BikeModel`. No other functions touched. Both functions keep the exact `function ({ w, l, color }: ModelProps)` signature, so the Task-5-b viewer integration needs no changes.
+- Car (23 meshes, ≤30 budget): tapered chassis + raised cabin, slanted dark-glass windshields with chrome mirrors, grille, emissive headlights/taillights, 4 tires with lighter hubs; gentle ±0.1ft bob + subtle roll on `sin(t*2)`; wheels stay grounded for a realistic suspension feel.
+- Bike (22 meshes, ≤30 budget): metallic frame + curved-top fuel tank, dark engine block, leather seat, handlebar with grips, 2 tilted metallic front forks, metallic-silver exhaust pipe + tip, emissive spherical headlight + chrome ring housing, emissive red tail light, 2 wheels with hubs and front-wheel cross-spokes; front wheel spins around its axle (`t*2.5` rad/s) and the body has a subtle ±0.03 rad roll lean.
+- Both models use `castShadow` on primary and emissive meshes, respect the 1-unit-per-foot / +Z-front convention, and feel "alive" without being distracting — exactly meeting the realistic-and-animated goal.
+
+---
+Task ID: 10 (door editing + room split + 3D furniture + realistic car/bike)
+Agent: main + subagent (5-c car/bike rebuild)
+Task: Make doors fully editable with swing direction, add room zig-zag split, enable furniture add/edit in 3D, rebuild car/bike as realistic animated models
+
+Work Log:
+- Added `swing` property to DoorMarker type: 'in-left' | 'in-right' | 'out-left' | 'out-right'
+- Updated all DoorMarker creations across engine, apply-actions, demo-layout, workspace, tool-panel to include swing
+- Updated DoorGraphic in blueprint-canvas to render swing arc based on direction (in/out + left/right), with hinge on correct side
+- Made doors draggable on canvas: added data-door-room-id and data-door-index attributes, door-move drag mode, pointer handlers for dragging door position along wall
+- Updated DoorToolPanel: added wall selector (top/right/bottom/left buttons), position slider, width input, swing direction selector (4 buttons with arrow icons)
+- Added "Split Room (Zig-Zag)" feature to RoomToolPanel: Split ↕ (vertical split into left/right halves) and Split ↔ (horizontal split into top/bottom halves). Creates a new adjacent room and resizes the original. Enables L-shaped/T-shaped layouts to manage free spaces.
+- Added 3D furniture quick-add bar at bottom of 3D view: Bed, Sofa, Table, Chair, Counter, Toilet, Desk, Plant, Car, Bike buttons. Clicking adds furniture at center and shows "Switch to 2D" hint for editing.
+- Added furniture selection hint in 3D view when furniture is selected
+- Subagent rebuilt CarModel and BikeModel in furniture-3d.tsx:
+  • CarModel: 23 meshes — metallic body with tapered hood/trunk, raised cabin, slanted windshields, side windows, chrome mirrors, dark grille, emissive headlights/taillights, 4 wheels with hubs, animated gentle bobbing (±0.1ft sin wave)
+  • BikeModel: 22 meshes — metallic frame, raised fuel tank with curved top, dark engine block, leather seat, rear fender, handlebar with grips, tilted front forks, metallic exhaust pipe, headlight with chrome ring, tail light, 2 wheels with spokes, animated front wheel spin (rotation.x = t*2.5) + body lean
+
+Verification (Agent Browser):
+- Layout valid, 11→12 rooms after split, score 97/100
+- Door tool: wall selector + position slider + width + swing direction (4 options) + add door — all working
+- Room tool: split ↕ and split ↔ working (room count increased from 11 to 12)
+- 3D view: furniture quick-add bar visible with 10 items, car added successfully, "Switch to 2D" hint appears
+- No errors, lint clean, HTTP 200
+
+Stage Summary:
+- Doors fully editable: position (drag + slider), wall (4 options), width, swing direction (4 options)
+- Rooms zig-zag flexible: split vertically or horizontally to create L/T-shaped layouts
+- Furniture addable in 3D view via quick-add bar, switch to 2D for full editing
+- Car and bike rebuilt as realistic animated 3D models (metallic paint, glass windshields, spinning wheels)

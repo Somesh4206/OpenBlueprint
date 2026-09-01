@@ -1,0 +1,1096 @@
+     1→'use client';
+     2→
+     3→// =========================================================================
+     4→// OpenBlueprint — 3D Furniture Models Library (Task 5-a)
+     5→// React Three Fiber component that renders a recognizable 3D model for
+     6→// each FurnitureType, built from Three.js primitives (boxes, cylinders,
+     7→// spheres, cones, torus).
+     8→//
+     9→// Coordinate convention (matches viewer-3d.tsx):
+    10→//   - 1 unit = 1 foot
+    11→//   - Origin at the centre of the plot, +Y is up
+    12→//   - The parent viewer passes the ALREADY-CONVERTED world-space centre
+    13→//     of the furniture via `worldX` / `worldZ`.
+    14→//   - The model is built in local space (centred on origin, sitting on
+    15→//     the floor at y=0), then placed by a single parent <group> with
+    16→//     position=[worldX, 0, worldZ] and rotation=[0, item.rotation*π/180, 0].
+    17→//
+    18→// Each model scales to fit `item.width` (local X) × `item.length`
+    19→// (local Z). Local +Z is treated as the "back" of the furniture
+    20→// (headboard, sofa backrest, chair backrest, etc.).
+    21→// =========================================================================
+    22→
+    23→import React, { useMemo } from 'react';
+    24→import type { FurnitureItem, FurnitureType } from '@/lib/types';
+    25→
+    26→// -------------------------------------------------------------------------
+    27→// Public API
+    28→// -------------------------------------------------------------------------
+    29→
+    30→export interface FurnitureMesh3DProps {
+    31→  item: FurnitureItem;
+    32→  /** Already-converted 3D X coordinate (feet, plot-centred). */
+    33→  worldX: number;
+    34→  /** Already-converted 3D Z coordinate (feet, plot-centred). */
+    35→  worldZ: number;
+    36→}
+    37→
+    38→export function FurnitureMesh3D(props: FurnitureMesh3DProps): React.JSX.Element {
+    39→  const { item, worldX, worldZ } = props;
+    40→  const color = item.color || '#9aa0a6';
+    41→  const w = Math.max(item.width, 0.5);
+    42→  const l = Math.max(item.length, 0.5);
+    43→
+    44→  // Memoize the model subtree so changing position/rotation on the parent
+    45→  // group does not rebuild the entire mesh tree.
+    46→  const model = useMemo(
+    47→    () => buildFurnitureModel(item.type, w, l, color),
+    48→    [item.type, w, l, color],
+    49→  );
+    50→
+    51→  const rotY = ((item.rotation || 0) * Math.PI) / 180;
+    52→
+    53→  return (
+    54→    <group position={[worldX, 0, worldZ]} rotation={[0, rotY, 0]}>
+    55→      {model}
+    56→    </group>
+    57→  );
+    58→}
+    59→
+    60→export default FurnitureMesh3D;
+    61→
+    62→// -------------------------------------------------------------------------
+    63→// Colour helpers
+    64→// -------------------------------------------------------------------------
+    65→
+    66→/** Darken a hex colour by `amount` (0..1). Returns the original on parse error. */
+    67→function darken(hex: string, amount: number): string {
+    68→  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+    69→  if (!m) return hex;
+    70→  const num = parseInt(m[1], 16);
+    71→  let r = (num >> 16) & 0xff;
+    72→  let g = (num >> 8) & 0xff;
+    73→  let b = num & 0xff;
+    74→  const f = Math.max(0, 1 - amount);
+    75→  r = Math.min(255, Math.round(r * f));
+    76→  g = Math.min(255, Math.round(g * f));
+    77→  b = Math.min(255, Math.round(b * f));
+    78→  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    79→}
+    80→
+    81→/** Lighten a hex colour by `amount` (0..1) toward white. */
+    82→function lighten(hex: string, amount: number): string {
+    83→  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+    84→  if (!m) return hex;
+    85→  const num = parseInt(m[1], 16);
+    86→  let r = (num >> 16) & 0xff;
+    87→  let g = (num >> 8) & 0xff;
+    88→  let b = num & 0xff;
+    89→  r = Math.min(255, Math.round(r + (255 - r) * amount));
+    90→  g = Math.min(255, Math.round(g + (255 - g) * amount));
+    91→  b = Math.min(255, Math.round(b + (255 - b) * amount));
+    92→  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    93→}
+    94→
+    95→// -------------------------------------------------------------------------
+    96→// Primitive helpers — thin wrappers over R3F meshes so each model reads
+    97→// as a tidy declarative scene.
+    98→// -------------------------------------------------------------------------
+    99→
+   100→interface BoxProps {
+   101→  position?: [number, number, number];
+   102→  size: [number, number, number];
+   103→  color: string;
+   104→  roughness?: number;
+   105→  metalness?: number;
+   106→  opacity?: number;
+   107→  rotation?: [number, number, number];
+   108→}
+   109→
+   110→function Box({
+   111→  position = [0, 0, 0],
+   112→  size,
+   113→  color,
+   114→  roughness = 0.7,
+   115→  metalness = 0,
+   116→  opacity = 1,
+   117→  rotation,
+   118→}: BoxProps) {
+   119→  return (
+   120→    <mesh position={position} rotation={rotation} castShadow receiveShadow>
+   121→      <boxGeometry args={size} />
+   122→      <meshStandardMaterial
+   123→        color={color}
+   124→        roughness={roughness}
+   125→        metalness={metalness}
+   126→        transparent={opacity < 1}
+   127→        opacity={opacity}
+   128→      />
+   129→    </mesh>
+   130→  );
+   131→}
+   132→
+   133→interface CylProps {
+   134→  position?: [number, number, number];
+   135→  rotation?: [number, number, number];
+   136→  radiusTop?: number;
+   137→  radiusBottom?: number;
+   138→  height: number;
+   139→  color: string;
+   140→  roughness?: number;
+   141→  metalness?: number;
+   142→  opacity?: number;
+   143→  radialSegments?: number;
+   144→}
+   145→
+   146→function Cyl({
+   147→  position = [0, 0, 0],
+   148→  rotation,
+   149→  radiusTop = 0.1,
+   150→  radiusBottom = 0.1,
+   151→  height,
+   152→  color,
+   153→  roughness = 0.5,
+   154→  metalness = 0.2,
+   155→  opacity = 1,
+   156→  radialSegments = 16,
+   157→}: CylProps) {
+   158→  return (
+   159→    <mesh position={position} rotation={rotation} castShadow receiveShadow>
+   160→      <cylinderGeometry
+   161→        args={[radiusTop, radiusBottom, height, radialSegments]}
+   162→      />
+   163→      <meshStandardMaterial
+   164→        color={color}
+   165→        roughness={roughness}
+   166→        metalness={metalness}
+   167→        transparent={opacity < 1}
+   168→        opacity={opacity}
+   169→      />
+   170→    </mesh>
+   171→  );
+   172→}
+   173→
+   174→interface SphProps {
+   175→  position?: [number, number, number];
+   176→  radius: number;
+   177→  scale?: [number, number, number];
+   178→  color: string;
+   179→  roughness?: number;
+   180→  metalness?: number;
+   181→  opacity?: number;
+   182→}
+   183→
+   184→function Sph({
+   185→  position = [0, 0, 0],
+   186→  radius,
+   187→  scale,
+   188→  color,
+   189→  roughness = 0.7,
+   190→  metalness = 0,
+   191→  opacity = 1,
+   192→}: SphProps) {
+   193→  return (
+   194→    <mesh position={position} scale={scale} castShadow receiveShadow>
+   195→      <sphereGeometry args={[radius, 18, 18]} />
+   196→      <meshStandardMaterial
+   197→        color={color}
+   198→        roughness={roughness}
+   199→        metalness={metalness}
+   200→        transparent={opacity < 1}
+   201→        opacity={opacity}
+   202→      />
+   203→    </mesh>
+   204→  );
+   205→}
+   206→
+   207→interface ConeProps {
+   208→  position?: [number, number, number];
+   209→  radius: number;
+   210→  height: number;
+   211→  color: string;
+   212→  roughness?: number;
+   213→}
+   214→
+   215→function Cone({
+   216→  position = [0, 0, 0],
+   217→  radius,
+   218→  height,
+   219→  color,
+   220→  roughness = 0.8,
+   221→}: ConeProps) {
+   222→  return (
+   223→    <mesh position={position} castShadow receiveShadow>
+   224→      <coneGeometry args={[radius, height, 18]} />
+   225→      <meshStandardMaterial color={color} roughness={roughness} />
+   226→    </mesh>
+   227→  );
+   228→}
+   229→
+   230→interface HalfSphProps {
+   231→  position?: [number, number, number];
+   232→  radius: number;
+   233→  scale?: [number, number, number];
+   234→  color: string;
+   235→  roughness?: number;
+   236→}
+   237→
+   238→/** Upper hemisphere (dome). */
+   239→function HalfSphere({
+   240→  position = [0, 0, 0],
+   241→  radius,
+   242→  scale,
+   243→  color,
+   244→  roughness = 0.6,
+   245→}: HalfSphProps) {
+   246→  return (
+   247→    <mesh position={position} scale={scale} castShadow receiveShadow>
+   248→      <sphereGeometry
+   249→        args={[radius, 20, 20, 0, Math.PI * 2, 0, Math.PI / 2]}
+   250→      />
+   251→      <meshStandardMaterial color={color} roughness={roughness} />
+   252→    </mesh>
+   253→  );
+   254→}
+   255→
+   256→interface TorusProps {
+   257→  position?: [number, number, number];
+   258→  rotation?: [number, number, number];
+   259→  radius: number;
+   260→  tube: number;
+   261→  color: string;
+   262→  roughness?: number;
+   263→  metalness?: number;
+   264→}
+   265→
+   266→function Torus({
+   267→  position = [0, 0, 0],
+   268→  rotation,
+   269→  radius,
+   270→  tube,
+   271→  color,
+   272→  roughness = 0.4,
+   273→  metalness = 0.4,
+   274→}: TorusProps) {
+   275→  return (
+   276→    <mesh position={position} rotation={rotation} castShadow receiveShadow>
+   277→      <torusGeometry args={[radius, tube, 8, 28]} />
+   278→      <meshStandardMaterial color={color} roughness={roughness} metalness={metalness} />
+   279→    </mesh>
+   280→  );
+   281→}
+   282→
+   283→// -------------------------------------------------------------------------
+   284→// Per-type model components
+   285→// -------------------------------------------------------------------------
+   286→
+   287→interface ModelProps {
+   288→  w: number;
+   289→  l: number;
+   290→  color: string;
+   291→}
+   292→
+   293→// ---- Beds ----------------------------------------------------------------
+   294→
+   295→function BedModel({ w, l, color }: ModelProps) {
+   296→  const pillow = '#f4f1ec';
+   297→  const head = darken(color, 0.25);
+   298→  return (
+   299→    <group>
+   300→      {/* Base / frame */}
+   301→      <Box position={[0, 0.5, 0]} size={[w * 0.95, 1, l * 0.85]} color={darken(color, 0.15)} roughness={0.75} />
+   302→      {/* Mattress */}
+   303→      <Box position={[0, 1.25, 0]} size={[w * 0.92, 0.5, l * 0.82]} color={lighten(color, 0.15)} roughness={0.85} />
+   304→      {/* Duvet line */}
+   305→      <Box position={[0, 1.5, -l * 0.18]} size={[w * 0.92, 0.12, l * 0.55]} color={color} roughness={0.85} />
+   306→      {/* Headboard */}
+   307→      <Box position={[0, 2, l * 0.45]} size={[w * 0.96, 3.6, 0.3]} color={head} roughness={0.7} />
+   308→      {/* Pillows */}
+   309→      <Box position={[-w * 0.22, 1.62, l * 0.28]} size={[w * 0.3, 0.35, l * 0.18]} color={pillow} roughness={0.9} />
+   310→      <Box position={[w * 0.22, 1.62, l * 0.28]} size={[w * 0.3, 0.35, l * 0.18]} color={pillow} roughness={0.9} />
+   311→    </group>
+   312→  );
+   313→}
+   314→
+   315→// ---- Sofas ---------------------------------------------------------------
+   316→
+   317→function SofaModel({ w, l, color }: ModelProps) {
+   318→  const cushion = lighten(color, 0.12);
+   319→  const frame = darken(color, 0.2);
+   320→  return (
+   321→    <group>
+   322→      {/* Seat base */}
+   323→      <Box position={[0, 0.9, 0]} size={[w * 0.96, 1.1, l * 0.85]} color={frame} roughness={0.8} />
+   324→      {/* Seat cushions */}
+   325→      <Box position={[-w * 0.22, 1.55, -l * 0.02]} size={[w * 0.42, 0.4, l * 0.7]} color={cushion} roughness={0.85} />
+   326→      <Box position={[w * 0.22, 1.55, -l * 0.02]} size={[w * 0.42, 0.4, l * 0.7]} color={cushion} roughness={0.85} />
+   327→      {/* Backrest */}
+   328→      <Box position={[0, 2.4, l * 0.38]} size={[w * 0.96, 1.9, 0.35]} color={color} roughness={0.8} />
+   329→      {/* Armrests */}
+   330→      <Box position={[-w * 0.46, 1.5, 0]} size={[0.3, 2, l * 0.85]} color={frame} roughness={0.8} />
+   331→      <Box position={[w * 0.46, 1.5, 0]} size={[0.3, 2, l * 0.85]} color={frame} roughness={0.8} />
+   332→    </group>
+   333→  );
+   334→}
+   335→
+   336→function SofaLModel({ w, l, color }: ModelProps) {
+   337→  const cushion = lighten(color, 0.12);
+   338→  const frame = darken(color, 0.2);
+   339→  return (
+   340→    <group>
+   341→      {/* Horizontal arm: full width along X, sits at -Z half */}
+   342→      <Box position={[0, 0.9, -l * 0.22]} size={[w * 0.96, 1.1, l * 0.52]} color={frame} roughness={0.8} />
+   343→      <Box position={[-w * 0.22, 1.55, -l * 0.22]} size={[w * 0.42, 0.4, l * 0.4]} color={cushion} roughness={0.85} />
+   344→      <Box position={[w * 0.22, 1.55, -l * 0.22]} size={[w * 0.42, 0.4, l * 0.4]} color={cushion} roughness={0.85} />
+   345→      {/* Vertical arm: right side along Z, sits at +Z half */}
+   346→      <Box position={[w * 0.28, 0.9, l * 0.22]} size={[w * 0.38, 1.1, l * 0.52]} color={frame} roughness={0.8} />
+   347→      <Box position={[w * 0.28, 1.55, l * 0.22]} size={[w * 0.3, 0.4, l * 0.42]} color={cushion} roughness={0.85} />
+   348→      {/* Backrest along -Z edge of horizontal arm */}
+   349→      <Box position={[0, 2.4, -l * 0.46]} size={[w * 0.96, 1.9, 0.3]} color={color} roughness={0.8} />
+   350→      {/* Backrest along +X edge of vertical arm */}
+   351→      <Box position={[w * 0.46, 2.4, l * 0.22]} size={[0.3, 1.9, l * 0.52]} color={color} roughness={0.8} />
+   352→    </group>
+   353→  );
+   354→}
+   355→
+   356→function ArmchairModel({ w, l, color }: ModelProps) {
+   357→  const cushion = lighten(color, 0.12);
+   358→  const frame = darken(color, 0.2);
+   359→  return (
+   360→    <group>
+   361→      <Box position={[0, 0.9, 0]} size={[w * 0.9, 1.1, l * 0.85]} color={frame} roughness={0.8} />
+   362→      <Box position={[0, 1.55, 0]} size={[w * 0.75, 0.4, l * 0.7]} color={cushion} roughness={0.85} />
+   363→      <Box position={[0, 2.4, l * 0.38]} size={[w * 0.9, 1.9, 0.3]} color={color} roughness={0.8} />
+   364→      <Box position={[-w * 0.42, 1.5, 0]} size={[0.25, 2, l * 0.85]} color={frame} roughness={0.8} />
+   365→      <Box position={[w * 0.42, 1.5, 0]} size={[0.25, 2, l * 0.85]} color={frame} roughness={0.8} />
+   366→    </group>
+   367→  );
+   368→}
+   369→
+   370→// ---- Chairs --------------------------------------------------------------
+   371→
+   372→function ChairDiningModel({ w, l, color }: ModelProps) {
+   373→  const legColor = darken(color, 0.3);
+   374→  const legR = Math.min(w, l) * 0.08;
+   375→  return (
+   376→    <group>
+   377→      {/* Seat */}
+   378→      <Box position={[0, 1.5, 0]} size={[w * 0.9, 0.2, l * 0.9]} color={color} roughness={0.7} />
+   379→      {/* Backrest */}
+   380→      <Box position={[0, 2.4, -l * 0.4]} size={[w * 0.9, 1.8, 0.15]} color={color} roughness={0.7} />
+   381→      {/* Legs */}
+   382→      <Cyl position={[-w * 0.38, 0.7, -l * 0.38]} radiusTop={legR} radiusBottom={legR} height={1.4} color={legColor} />
+   383→      <Cyl position={[w * 0.38, 0.7, -l * 0.38]} radiusTop={legR} radiusBottom={legR} height={1.4} color={legColor} />
+   384→      <Cyl position={[-w * 0.38, 0.7, l * 0.38]} radiusTop={legR} radiusBottom={legR} height={1.4} color={legColor} />
+   385→      <Cyl position={[w * 0.38, 0.7, l * 0.38]} radiusTop={legR} radiusBottom={legR} height={1.4} color={legColor} />
+   386→    </group>
+   387→  );
+   388→}
+   389→
+   390→function ChairOfficeModel({ w, l, color }: ModelProps) {
+   391→  const metal = '#3a3f47';
+   392→  const legLen = Math.min(w, l) * 0.85;
+   393→  const angles = [0, 72, 144, 216, 288];
+   394→  return (
+   395→    <group>
+   396→      {/* 5-star base: 5 cylinders radiating outward */}
+   397→      {angles.map((a, i) => (
+   398→        <group key={i} rotation={[0, (a * Math.PI) / 180, 0]}>
+   399→          <Cyl
+   400→            position={[legLen * 0.4, 0.2, 0]}
+   401→            rotation={[0, 0, Math.PI / 2]}
+   402→            radiusTop={0.06}
+   403→            radiusBottom={0.06}
+   404→            height={legLen * 0.8}
+   405→            color={metal}
+   406→            metalness={0.6}
+   407→            roughness={0.3}
+   408→          />
+   409→        </group>
+   410→      ))}
+   411→      {/* Central post */}
+   412→      <Cyl position={[0, 1.1, 0]} radiusTop={0.12} radiusBottom={0.12} height={1.9} color={metal} metalness={0.6} roughness={0.3} />
+   413→      {/* Seat */}
+   414→      <Box position={[0, 2.15, 0]} size={[w * 0.85, 0.2, l * 0.85]} color={color} roughness={0.7} />
+   415→      {/* Low backrest */}
+   416→      <Box position={[0, 2.85, -l * 0.4]} size={[w * 0.7, 1.3, 0.18]} color={color} roughness={0.7} />
+   417→    </group>
+   418→  );
+   419→}
+   420→
+   421→function BarStoolModel({ w, l, color }: ModelProps) {
+   422→  const metal = '#2a2d33';
+   423→  const seatR = Math.min(w, l) * 0.42;
+   424→  return (
+   425→    <group>
+   426→      {/* Post */}
+   427→      <Cyl position={[0, 1.1, 0]} radiusTop={0.08} radiusBottom={0.08} height={2.2} color={metal} metalness={0.7} roughness={0.3} />
+   428→      {/* Round seat */}
+   429→      <Cyl position={[0, 2.3, 0]} radiusTop={seatR} radiusBottom={seatR} height={0.2} color={color} roughness={0.6} />
+   430→      {/* Foot ring */}
+   431→      <Torus position={[0, 0.8, 0]} rotation={[Math.PI / 2, 0, 0]} radius={seatR * 0.55} tube={0.04} color={metal} metalness={0.7} />
+   432→      {/* Base foot */}
+   433→      <Cyl position={[0, 0.06, 0]} radiusTop={0.25} radiusBottom={0.3} height={0.12} color={metal} metalness={0.7} roughness={0.3} />
+   434→    </group>
+   435→  );
+   436→}
+   437→
+   438→// ---- Tables --------------------------------------------------------------
+   439→
+   440→function TableRoundModel({ w, l, color }: ModelProps) {
+   441→  const topR = Math.min(w, l) * 0.46;
+   442→  const baseR = Math.min(w, l) * 0.28;
+   443→  return (
+   444→    <group>
+   445→      {/* Base */}
+   446→      <Cyl position={[0, 0.15, 0]} radiusTop={baseR} radiusBottom={baseR} height={0.3} color={darken(color, 0.2)} roughness={0.6} />
+   447→      {/* Pedestal */}
+   448→      <Cyl position={[0, 1.2, 0]} radiusTop={0.14} radiusBottom={0.14} height={1.9} color={darken(color, 0.25)} roughness={0.5} />
+   449→      {/* Top */}
+   450→      <Cyl position={[0, 2.3, 0]} radiusTop={topR} radiusBottom={topR} height={0.2} color={color} roughness={0.4} />
+   451→    </group>
+   452→  );
+   453→}
+   454→
+   455→function TableRectModel({ w, l, color, height }: ModelProps & { height: number }) {
+   456→  const legColor = darken(color, 0.3);
+   457→  const legR = Math.min(w, l) * 0.06;
+   458→  return (
+   459→    <group>
+   460→      <Box position={[0, height, 0]} size={[w * 0.96, 0.2, l * 0.96]} color={color} roughness={0.5} />
+   461→      <Cyl position={[-w * 0.4, height / 2, -l * 0.4]} radiusTop={legR} radiusBottom={legR} height={height} color={legColor} />
+   462→      <Cyl position={[w * 0.4, height / 2, -l * 0.4]} radiusTop={legR} radiusBottom={legR} height={height} color={legColor} />
+   463→      <Cyl position={[-w * 0.4, height / 2, l * 0.4]} radiusTop={legR} radiusBottom={legR} height={height} color={legColor} />
+   464→      <Cyl position={[w * 0.4, height / 2, l * 0.4]} radiusTop={legR} radiusBottom={legR} height={height} color={legColor} />
+   465→    </group>
+   466→  );
+   467→}
+   468→
+   469→function DeskModel({ w, l, color }: ModelProps) {
+   470→  const legColor = darken(color, 0.3);
+   471→  const legR = Math.min(w, l) * 0.05;
+   472→  const H = 2.5;
+   473→  return (
+   474→    <group>
+   475→      <Box position={[0, H, 0]} size={[w * 0.96, 0.2, l * 0.96]} color={color} roughness={0.5} />
+   476→      {/* Three legs + a drawer pedestal on one side */}
+   477→      <Cyl position={[-w * 0.4, H / 2, -l * 0.4]} radiusTop={legR} radiusBottom={legR} height={H} color={legColor} />
+   478→      <Cyl position={[-w * 0.4, H / 2, l * 0.4]} radiusTop={legR} radiusBottom={legR} height={H} color={legColor} />
+   479→      <Cyl position={[w * 0.4, H / 2, -l * 0.4]} radiusTop={legR} radiusBottom={legR} height={H} color={legColor} />
+   480→      {/* Drawer pedestal */}
+   481→      <Box position={[w * 0.3, H / 2, l * 0.0]} size={[w * 0.32, H, l * 0.8]} color={darken(color, 0.1)} roughness={0.6} />
+   482→      {/* Drawer lines */}
+   483→      <Box position={[w * 0.3, H * 0.7, l * 0.41]} size={[w * 0.28, 0.04, 0.02]} color={darken(color, 0.4)} />
+   484→      <Box position={[w * 0.3, H * 0.45, l * 0.41]} size={[w * 0.28, 0.04, 0.02]} color={darken(color, 0.4)} />
+   485→    </group>
+   486→  );
+   487→}
+   488→
+   489→// ---- Storage / Wardrobes -------------------------------------------------
+   490→
+   491→function WardrobeModel({ w, l, color }: ModelProps) {
+   492→  const body = darken(color, 0.05);
+   493→  const shelf = darken(color, 0.25);
+   494→  const H = 7;
+   495→  return (
+   496→    <group>
+   497→      <Box position={[0, H / 2, 0]} size={[w * 0.96, H, l * 0.95]} color={body} roughness={0.65} />
+   498→      {/* Two door seams on the front (+Z face) */}
+   499→      <Box position={[0, H / 2, l * 0.485]} size={[0.04, H * 0.92, 0.03]} color={shelf} />
+   500→      <Box position={[-w * 0.24, H / 2, l * 0.485]} size={[0.02, H * 0.92, 0.02]} color={shelf} />
+   501→      <Box position={[w * 0.24, H / 2, l * 0.485]} size={[0.02, H * 0.92, 0.02]} color={shelf} />
+   502→      {/* Door handles */}
+   503→      <Cyl position={[-w * 0.04, H / 2, l * 0.5]} rotation={[Math.PI / 2, 0, 0]} radiusTop={0.03} radiusBottom={0.03} height={0.3} color={shelf} metalness={0.6} />
+   504→      <Cyl position={[w * 0.04, H / 2, l * 0.5]} rotation={[Math.PI / 2, 0, 0]} radiusTop={0.03} radiusBottom={0.03} height={0.3} color={shelf} metalness={0.6} />
+   505→      {/* Internal shelves visible from top */}
+   506→      <Box position={[0, H * 0.33, 0]} size={[w * 0.9, 0.08, l * 0.88]} color={shelf} />
+   507→      <Box position={[0, H * 0.66, 0]} size={[w * 0.9, 0.08, l * 0.88]} color={shelf} />
+   508→    </group>
+   509→  );
+   510→}
+   511→
+   512→function ShelfModel({ w, l, color }: ModelProps) {
+   513→  const shelf = darken(color, 0.25);
+   514→  const H = 6.5;
+   515→  return (
+   516→    <group>
+   517→      {/* Side panels + back */}
+   518→      <Box position={[0, H / 2, 0]} size={[w * 0.96, H, l * 0.9]} color={color} roughness={0.65} />
+   519→      {/* Open front: 4 horizontal shelves recessed */}
+   520→      {[H * 0.15, H * 0.38, H * 0.61, H * 0.84].map((y, i) => (
+   521→        <Box key={i} position={[0, y, l * 0.05]} size={[w * 0.9, 0.08, l * 0.78]} color={shelf} roughness={0.6} />
+   522→      ))}
+   523→      {/* Vertical partitions */}
+   524→      <Box position={[0, H / 2, l * 0.05]} size={[0.08, H * 0.9, l * 0.78]} color={shelf} roughness={0.6} />
+   525→    </group>
+   526→  );
+   527→}
+   528→
+   529→function DisplayShelfModel({ w, l, color }: ModelProps) {
+   530→  const shelf = darken(color, 0.25);
+   531→  const H = 5;
+   532→  return (
+   533→    <group>
+   534→      <Box position={[0, H / 2, 0]} size={[w * 0.96, H, l * 0.85]} color={color} roughness={0.65} />
+   535→      {[H * 0.2, H * 0.5, H * 0.8].map((y, i) => (
+   536→        <Box key={i} position={[0, y, l * 0.05]} size={[w * 0.9, 0.08, l * 0.72]} color={shelf} roughness={0.6} />
+   537→      ))}
+   538→      {/* Vertical divider */}
+   539→      <Box position={[0, H / 2, l * 0.05]} size={[0.08, H * 0.92, l * 0.72]} color={shelf} roughness={0.6} />
+   540→    </group>
+   541→  );
+   542→}
+   543→
+   544→// ---- TV ------------------------------------------------------------------
+   545→
+   546→function TvUnitModel({ w, l, color }: ModelProps) {
+   547→  const H = 1.5;
+   548→  return (
+   549→    <group>
+   550→      <Box position={[0, H / 2, 0]} size={[w * 0.96, H, l * 0.9]} color={color} roughness={0.65} />
+   551→      {/* Door seams */}
+   552→      <Box position={[0, H / 2, l * 0.46]} size={[0.03, H * 0.8, 0.02]} color={darken(color, 0.35)} />
+   553→      <Box position={[-w * 0.22, H / 2, l * 0.46]} size={[0.02, H * 0.8, 0.02]} color={darken(color, 0.35)} />
+   554→      <Box position={[w * 0.22, H / 2, l * 0.46]} size={[0.02, H * 0.8, 0.02]} color={darken(color, 0.35)} />
+   555→    </group>
+   556→  );
+   557→}
+   558→
+   559→function TvWallModel({ w, l, color }: ModelProps) {
+   560→  const screen = '#0a0a0a';
+   561→  const frame = '#1a1a1a';
+   562→  return (
+   563→    <group>
+   564→      {/* Stand base */}
+   565→      <Box position={[0, 0.1, 0]} size={[w * 0.5, 0.2, l * 1.5]} color={frame} roughness={0.4} metalness={0.4} />
+   566→      {/* Stand neck */}
+   567→      <Box position={[0, 1, 0]} size={[0.25, 1.8, 0.25]} color={frame} roughness={0.4} metalness={0.4} />
+   568→      {/* Screen */}
+   569→      <Box position={[0, 3.7, 0]} size={[w * 0.95, 0.15, l * 1.6]} color={screen} roughness={0.2} metalness={0.6} />
+   570→      {/* Screen glow */}
+   571→      <Box position={[0, 3.7, l * 0.7]} size={[w * 0.85, 0.05, l * 1.2]} color={'#1a2630'} roughness={0.3} metalness={0.5} opacity={0.6} />
+   572→    </group>
+   573→  );
+   574→}
+   575→
+   576→// ---- Kitchen -------------------------------------------------------------
+   577→
+   578→function CounterModel({ w, l, color }: ModelProps) {
+   579→  const top = darken(color, 0.1);
+   580→  return (
+   581→    <group>
+   582→      <Box position={[0, 1.4, 0]} size={[w * 0.96, 2.8, l * 0.95]} color={color} roughness={0.6} />
+   583→      <Box position={[0, 2.95, 0]} size={[w, 0.2, l]} color={top} roughness={0.4} />
+   584→      {/* Door lines on front */}
+   585→      {Array.from({ length: Math.max(2, Math.floor(w / 2)) }).map((_, i, arr) => {
+   586→        const x = -w * 0.4 + (i / Math.max(1, arr.length - 1)) * w * 0.8;
+   587→        return <Box key={i} position={[x, 1.5, l * 0.485]} size={[0.03, 2.4, 0.02]} color={darken(color, 0.35)} />;
+   588→      })}
+   589→    </group>
+   590→  );
+   591→}
+   592→
+   593→function KitchenIslandModel({ w, l, color }: ModelProps) {
+   594→  const top = darken(color, 0.1);
+   595→  return (
+   596→    <group>
+   597→      <Box position={[0, 1.4, 0]} size={[w * 0.9, 2.8, l * 0.9]} color={color} roughness={0.6} />
+   598→      {/* Countertop with overhang */}
+   599→      <Box position={[0, 2.9, 0]} size={[w * 1.05, 0.2, l * 1.05]} color={top} roughness={0.4} />
+   600→      {/* Stool-side overhang detail */}
+   601→      <Box position={[0, 2.7, l * 0.5]} size={[w * 0.8, 0.08, 0.15]} color={darken(top, 0.15)} roughness={0.5} />
+   602→    </group>
+   603→  );
+   604→}
+   605→
+   606→function StoveModel({ w, l, color }: ModelProps) {
+   607→  const top = '#1a1a1a';
+   608→  const burner = '#3a3a3a';
+   609→  return (
+   610→    <group>
+   611→      <Box position={[0, 1.4, 0]} size={[w * 0.95, 2.8, l * 0.95]} color={color} roughness={0.5} metalness={0.3} />
+   612→      <Box position={[0, 2.9, 0]} size={[w * 0.95, 0.1, l * 0.95]} color={top} roughness={0.3} metalness={0.5} />
+   613→      {/* 4 burners */}
+   614→      <Cyl position={[-w * 0.22, 2.96, -l * 0.22]} radiusTop={w * 0.1} radiusBottom={w * 0.1} height={0.08} color={burner} metalness={0.6} roughness={0.3} />
+   615→      <Cyl position={[w * 0.22, 2.96, -l * 0.22]} radiusTop={w * 0.1} radiusBottom={w * 0.1} height={0.08} color={burner} metalness={0.6} roughness={0.3} />
+   616→      <Cyl position={[-w * 0.22, 2.96, l * 0.22]} radiusTop={w * 0.1} radiusBottom={w * 0.1} height={0.08} color={burner} metalness={0.6} roughness={0.3} />
+   617→      <Cyl position={[w * 0.22, 2.96, l * 0.22]} radiusTop={w * 0.1} radiusBottom={w * 0.1} height={0.08} color={burner} metalness={0.6} roughness={0.3} />
+   618→      {/* Control knobs */}
+   619→      <Cyl position={[-w * 0.3, 2.7, l * 0.5]} rotation={[Math.PI / 2, 0, 0]} radiusTop={0.05} radiusBottom={0.05} height={0.05} color={'#888'} metalness={0.7} />
+   620→      <Cyl position={[w * 0.3, 2.7, l * 0.5]} rotation={[Math.PI / 2, 0, 0]} radiusTop={0.05} radiusBottom={0.05} height={0.05} color={'#888'} metalness={0.7} />
+   621→    </group>
+   622→  );
+   623→}
+   624→
+   625→function SinkKitchenModel({ w, l, color }: ModelProps) {
+   626→  const basin = '#c0cad6';
+   627→  const metal = '#9aa3ad';
+   628→  return (
+   629→    <group>
+   630→      <Box position={[0, 1.4, 0]} size={[w * 0.95, 2.8, l * 0.95]} color={color} roughness={0.5} />
+   631→      <Box position={[0, 2.9, 0]} size={[w * 0.95, 0.12, l * 0.95]} color={darken(color, 0.15)} roughness={0.4} />
+   632→      {/* Recessed basin */}
+   633→      <Box position={[0, 2.85, 0]} size={[w * 0.65, 0.18, l * 0.65]} color={basin} roughness={0.3} metalness={0.4} />
+   634→      {/* Faucet */}
+   635→      <Cyl position={[-w * 0.25, 3.25, -l * 0.3]} radiusTop={0.05} radiusBottom={0.05} height={0.8} color={metal} metalness={0.8} roughness={0.2} />
+   636→      <Cyl position={[-w * 0.25, 3.65, -l * 0.1]} rotation={[Math.PI / 2, 0, 0]} radiusTop={0.05} radiusBottom={0.05} height={l * 0.35} color={metal} metalness={0.8} roughness={0.2} />
+   637→    </group>
+   638→  );
+   639→}
+   640→
+   641→function FridgeModel({ w, l, color }: ModelProps) {
+   642→  const H = 6;
+   643→  const line = darken(color, 0.3);
+   644→  return (
+   645→    <group>
+   646→      <Box position={[0, H / 2, 0]} size={[w * 0.95, H, l * 0.95]} color={color} roughness={0.4} metalness={0.3} />
+   647→      {/* Door split (freezer divider) */}
+   648→      <Box position={[0, H * 0.7, l * 0.485]} size={[w * 0.92, 0.04, 0.03]} color={line} />
+   649→      {/* Vertical door seams */}
+   650→      <Box position={[0, H / 2, l * 0.485]} size={[0.03, H * 0.95, 0.02]} color={line} />
+   651→      {/* Handles */}
+   652→      <Cyl position={[w * 0.4, H * 0.85, l * 0.5]} radiusTop={0.04} radiusBottom={0.04} height={0.6} color={line} metalness={0.7} />
+   653→      <Cyl position={[w * 0.4, H * 0.4, l * 0.5]} radiusTop={0.04} radiusBottom={0.04} height={1.0} color={line} metalness={0.7} />
+   654→    </group>
+   655→  );
+   656→}
+   657→
+   658→// ---- Bathroom ------------------------------------------------------------
+   659→
+   660→function ToiletModel({ w, l, color }: ModelProps) {
+   661→  const seat = '#e8e8e8';
+   662→  return (
+   663→    <group>
+   664→      {/* Tank */}
+   665→      <Box position={[0, 1.5, l * 0.28]} size={[w * 0.85, 2.4, l * 0.28]} color={color} roughness={0.4} />
+   666→      {/* Bowl — ellipsoid */}
+   667→      <Sph position={[0, 0.6, -l * 0.12]} radius={Math.min(w, l) * 0.4} scale={[1, 0.7, 1.1]} color={color} roughness={0.4} />
+   668→      {/* Seat (thin flat ring on top of bowl) */}
+   669→      <Cyl position={[0, 1.05, -l * 0.12]} radiusTop={Math.min(w, l) * 0.36} radiusBottom={Math.min(w, l) * 0.36} height={0.1} color={seat} roughness={0.5} />
+   670→      <Cyl position={[0, 1.1, -l * 0.12]} radiusTop={Math.min(w, l) * 0.22} radiusBottom={Math.min(w, l) * 0.22} height={0.12} color={darken(seat, 0.1)} roughness={0.5} />
+   671→    </group>
+   672→  );
+   673→}
+   674→
+   675→function BathtubModel({ w, l, color }: ModelProps) {
+   676→  const water = '#cfe2f0';
+   677→  return (
+   678→    <group>
+   679→      <Box position={[0, 0.7, 0]} size={[w * 0.96, 1.4, l * 0.96]} color={color} roughness={0.35} metalness={0.2} />
+   680→      {/* Recessed interior */}
+   681→      <Box position={[0, 1.05, 0]} size={[w * 0.78, 0.5, l * 0.78]} color={water} roughness={0.2} metalness={0.1} opacity={0.85} />
+   682→      {/* Faucet at one end */}
+   683→      <Cyl position={[-w * 0.4, 1.4, 0]} radiusTop={0.05} radiusBottom={0.05} height={0.5} color={'#9aa3ad'} metalness={0.8} roughness={0.2} />
+   684→      <Cyl position={[-w * 0.32, 1.6, 0]} rotation={[0, 0, Math.PI / 2]} radiusTop={0.04} radiusBottom={0.04} height={0.2} color={'#9aa3ad'} metalness={0.8} roughness={0.2} />
+   685→    </group>
+   686→  );
+   687→}
+   688→
+   689→function ShowerModel({ w, l, color }: ModelProps) {
+   690→  const glass = '#bcd6e6';
+   691→  const H = 6.5;
+   692→  return (
+   693→    <group>
+   694→      {/* Base */}
+   695→      <Box position={[0, 0.05, 0]} size={[w * 0.96, 0.1, l * 0.96]} color={color} roughness={0.5} />
+   696→      {/* Curb */}
+   697→      <Box position={[0, 0.2, l * 0.48]} size={[w * 0.96, 0.3, 0.15]} color={darken(color, 0.15)} roughness={0.5} />
+   698→      {/* Two glass walls (along -X and -Z) */}
+   699→      <Box position={[-w * 0.48, H / 2 + 0.2, 0]} size={[0.08, H, l * 0.96]} color={glass} roughness={0.1} metalness={0.1} opacity={0.2} />
+   700→      <Box position={[0, H / 2 + 0.2, -l * 0.48]} size={[w * 0.96, H, 0.08]} color={glass} roughness={0.1} metalness={0.1} opacity={0.2} />
+   701→      {/* Shower head at the corner */}
+   702→      <Cyl position={[-w * 0.4, H - 0.5, -l * 0.4]} radiusTop={0.1} radiusBottom={0.12} height={0.3} color={'#9aa3ad'} metalness={0.7} roughness={0.3} />
+   703→      <Cyl position={[-w * 0.4, H - 0.3, -l * 0.4]} rotation={[0, 0, 0]} radiusTop={0.04} radiusBottom={0.04} height={0.5} color={'#9aa3ad'} metalness={0.7} roughness={0.3} />
+   704→    </group>
+   705→  );
+   706→}
+   707→
+   708→function VanityModel({ w, l, color }: ModelProps) {
+   709→  const basin = '#dde6ed';
+   710→  const metal = '#9aa3ad';
+   711→  return (
+   712→    <group>
+   713→      <Box position={[0, 1.4, 0]} size={[w * 0.95, 2.8, l * 0.9]} color={color} roughness={0.55} />
+   714→      <Box position={[0, 2.9, 0]} size={[w * 1, 0.12, l * 0.95]} color={darken(color, 0.1)} roughness={0.35} />
+   715→      {/* Recessed basin */}
+   716→      <Box position={[0, 2.92, 0]} size={[w * 0.45, 0.18, l * 0.55]} color={basin} roughness={0.25} metalness={0.2} />
+   717→      {/* Faucet */}
+   718→      <Cyl position={[0, 3.3, -l * 0.25]} radiusTop={0.05} radiusBottom={0.05} height={0.8} color={metal} metalness={0.8} roughness={0.2} />
+   719→      <Cyl position={[0, 3.7, -l * 0.05]} rotation={[Math.PI / 2, 0, 0]} radiusTop={0.04} radiusBottom={0.04} height={l * 0.3} color={metal} metalness={0.8} roughness={0.2} />
+   720→      {/* Drawer line */}
+   721→      <Box position={[0, 1.6, l * 0.46]} size={[w * 0.85, 0.04, 0.02]} color={darken(color, 0.3)} />
+   722→    </group>
+   723→  );
+   724→}
+   725→
+   726→function WasherModel({ w, l, color }: ModelProps) {
+   727→  const door = '#2a2f36';
+   728→  const H = 3;
+   729→  return (
+   730→    <group>
+   731→      <Box position={[0, H / 2, 0]} size={[w * 0.95, H, l * 0.95]} color={color} roughness={0.4} metalness={0.3} />
+   732→      {/* Round door on +Z face — cylinder rotated to face +Z */}
+   733→      <Cyl position={[0, H * 0.55, l * 0.5]} rotation={[Math.PI / 2, 0, 0]} radiusTop={Math.min(w, l) * 0.3} radiusBottom={Math.min(w, l) * 0.3} height={0.1} color={door} roughness={0.2} metalness={0.5} />
+   734→      <Cyl position={[0, H * 0.55, l * 0.52]} rotation={[Math.PI / 2, 0, 0]} radiusTop={Math.min(w, l) * 0.22} radiusBottom={Math.min(w, l) * 0.22} height={0.05} color={'#6a727a'} roughness={0.3} metalness={0.6} />
+   735→      {/* Control panel */}
+   736→      <Box position={[0, H * 0.85, l * 0.48]} size={[w * 0.7, 0.3, 0.04]} color={darken(color, 0.25)} roughness={0.4} metalness={0.4} />
+   737→    </group>
+   738→  );
+   739→}
+   740→
+   741→// ---- Plants --------------------------------------------------------------
+   742→
+   743→function PlantModel({ w, l, color, large }: ModelProps & { large?: boolean }) {
+   744→  const potColor = '#a7613a';
+   745→  const foliage = color;
+   746→  const potH = large ? 1.1 : 0.7;
+   747→  const potR = Math.min(w, l) * (large ? 0.35 : 0.3);
+   748→  return (
+   749→    <group>
+   750→      {/* Pot */}
+   751→      <Cyl position={[0, potH / 2, 0]} radiusTop={potR} radiusBottom={potR * 0.85} height={potH} color={potColor} roughness={0.8} />
+   752→      {/* Soil */}
+   753→      <Cyl position={[0, potH - 0.02, 0]} radiusTop={potR * 0.95} radiusBottom={potR * 0.95} height={0.06} color={'#3a2a1a'} roughness={1} />
+   754→      {/* Foliage — cluster of spheres */}
+   755→      {large ? (
+   756→        <>
+   757→          <Sph position={[0, potH + 1.2, 0]} radius={potR * 1.4} scale={[1, 1.1, 1]} color={foliage} roughness={0.9} />
+   758→          <Sph position={[-potR * 0.8, potH + 0.9, potR * 0.4]} radius={potR * 0.9} color={lighten(foliage, 0.1)} roughness={0.9} />
+   759→          <Sph position={[potR * 0.7, potH + 1.5, -potR * 0.3]} radius={potR * 0.85} color={darken(foliage, 0.1)} roughness={0.9} />
+   760→          <Sph position={[0, potH + 2.2, 0]} radius={potR * 0.7} color={lighten(foliage, 0.05)} roughness={0.9} />
+   761→        </>
+   762→      ) : (
+   763→        <>
+   764→          <Sph position={[0, potH + 0.7, 0]} radius={potR * 1.1} color={foliage} roughness={0.9} />
+   765→          <Sph position={[-potR * 0.4, potH + 0.5, potR * 0.3]} radius={potR * 0.6} color={lighten(foliage, 0.1)} roughness={0.9} />
+   766→          <Sph position={[potR * 0.4, potH + 0.9, -potR * 0.2]} radius={potR * 0.55} color={darken(foliage, 0.1)} roughness={0.9} />
+   767→        </>
+   768→      )}
+   769→    </group>
+   770→  );
+   771→}
+   772→
+   773→// ---- Decor ---------------------------------------------------------------
+   774→
+   775→function RugModel({ w, l, color }: ModelProps) {
+   776→  return (
+   777→    <group>
+   778→      <Box position={[0, 0.025, 0]} size={[w * 0.96, 0.05, l * 0.96]} color={color} roughness={0.95} opacity={0.75} />
+   779→      {/* Inner border */}
+   780→      <Box position={[0, 0.04, 0]} size={[w * 0.78, 0.02, l * 0.78]} color={lighten(color, 0.15)} roughness={0.95} opacity={0.75} />
+   781→    </group>
+   782→  );
+   783→}
+   784→
+   785→function LampFloorModel({ w, l, color }: ModelProps) {
+   786→  const metal = '#3a3a3a';
+   787→  return (
+   788→    <group>
+   789→      {/* Base */}
+   790→      <Cyl position={[0, 0.1, 0]} radiusTop={0.35} radiusBottom={0.4} height={0.2} color={metal} metalness={0.6} roughness={0.3} />
+   791→      {/* Post */}
+   792→      <Cyl position={[0, 2.5, 0]} radiusTop={0.05} radiusBottom={0.05} height={4.8} color={metal} metalness={0.6} roughness={0.3} />
+   793→      {/* Shade — truncated cone */}
+   794→      <Cone position={[0, 5.1, 0]} radius={0.55} height={1.0} color={color} roughness={0.8} />
+   795→    </group>
+   796→  );
+   797→}
+   798→
+   799→function PoojaAltarModel({ w, l, color }: ModelProps) {
+   800→  const accent = '#d4a574';
+   801→  const domeColor = '#c08a55';
+   802→  return (
+   803→    <group>
+   804→      {/* Cabinet */}
+   805→      <Box position={[0, 1, 0]} size={[w * 0.95, 2, l * 0.95]} color={color} roughness={0.6} />
+   806→      {/* Door panel */}
+   807→      <Box position={[0, 1, l * 0.475]} size={[w * 0.78, 1.7, 0.04]} color={darken(color, 0.15)} roughness={0.6} />
+   808→      <Box position={[0, 1, l * 0.49]} size={[0.03, 1.7, 0.02]} color={accent} roughness={0.5} />
+   809→      {/* Step */}
+   810→      <Box position={[0, 0.15, l * 0.6]} size={[w * 0.8, 0.3, 0.4]} color={darken(color, 0.2)} roughness={0.6} />
+   811→      {/* Dome on top */}
+   812→      <HalfSphere position={[0, 2.05, 0]} radius={Math.min(w, l) * 0.25} color={domeColor} roughness={0.5} />
+   813→      {/* Finial */}
+   814→      <Cyl position={[0, 2.6, 0]} radiusTop={0.03} radiusBottom={0.06} height={0.3} color={accent} metalness={0.6} roughness={0.4} />
+   815→    </group>
+   816→  );
+   817→}
+   818→
+   819→// ---- Composite sets ------------------------------------------------------
+   820→
+   821→function DiningSetModel({ w, l, color, chairs }: ModelProps & { chairs: 4 | 6 }) {
+   822→  const tableW = w * 0.6;
+   823→  const tableL = l * 0.5;
+   824→  const chairColor = darken(color, 0.45);
+   825→  // Chair layout: chairs/2 along each long side (and 1 on each short side if 6)
+   826→  const layout: Array<[number, number, number]> = [];
+   827→  if (chairs === 4) {
+   828→    layout.push([-w * 0.15, 0, -l * 0.4]);
+   829→    layout.push([w * 0.15, 0, -l * 0.4]);
+   830→    layout.push([-w * 0.15, 0, l * 0.4]);
+   831→    layout.push([w * 0.15, 0, l * 0.4]);
+   832→  } else {
+   833→    layout.push([-w * 0.22, 0, -l * 0.4]);
+   834→    layout.push([0, 0, -l * 0.4]);
+   835→    layout.push([w * 0.22, 0, -l * 0.4]);
+   836→    layout.push([-w * 0.22, 0, l * 0.4]);
+   837→    layout.push([0, 0, l * 0.4]);
+   838→    layout.push([w * 0.22, 0, l * 0.4]);
+   839→  }
+   840→  return (
+   841→    <group>
+   842→      {/* Table (rect, dining height) */}
+   843→      <TableRectModel w={tableW} l={tableL} color={color} height={2.5} />
+   844→      {/* Chairs (rotated to face the table) */}
+   845→      {layout.map(([cx, cy, cz], i) => {
+   846→        const isTop = cz < 0;
+   847→        return (
+   848→          <group key={i} position={[cx, cy, cz]} rotation={[0, isTop ? Math.PI : 0, 0]}>
+   849→            <ChairDiningModel w={Math.min(w, l) * 0.22} l={Math.min(w, l) * 0.22} color={chairColor} />
+   850→          </group>
+   851→        );
+   852→      })}
+   853→    </group>
+   854→  );
+   855→}
+   856→
+   857→function OfficeCabinModel({ w, l, color }: ModelProps) {
+   858→  const deskColor = darken(color, 0.1);
+   859→  const chairColor = '#2a2d33';
+   860→  const partition = darken(color, 0.2);
+   861→  return (
+   862→    <group>
+   863→      {/* Desk along the back (-Z) */}
+   864→      <group position={[0, 0, -l * 0.28]}>
+   865→        <DeskModel w={w * 0.7} l={l * 0.32} color={deskColor} />
+   866→      </group>
+   867→      {/* Office chair */}
+   868→      <group position={[0, 0, -l * 0.05]}>
+   869→        <ChairOfficeModel w={Math.min(w, l) * 0.28} l={Math.min(w, l) * 0.28} color={chairColor} />
+   870→      </group>
+   871→      {/* Partition wall behind desk */}
+   872→      <Box position={[0, 2.5, -l * 0.46]} size={[w * 0.9, 5, 0.2]} color={partition} roughness={0.7} />
+   873→      {/* Bookshelf on the side */}
+   874→      <group position={[-w * 0.4, 0, l * 0.2]}>
+   875→        <ShelfModel w={w * 0.18} l={l * 0.5} color={deskColor} />
+   876→      </group>
+   877→    </group>
+   878→  );
+   879→}
+   880→
+   881→function ClothingRackModel({ w, l, color }: ModelProps) {
+   882→  const metal = darken(color, 0.1);
+   883→  const garment1 = '#6a7a90';
+   884→  const garment2 = '#9b6a6a';
+   885→  const garment3 = '#7a8a6a';
+   886→  const postH = 5;
+   887→  return (
+   888→    <group>
+   889→      {/* Two vertical posts */}
+   890→      <Cyl position={[-w * 0.4, postH / 2, 0]} radiusTop={0.08} radiusBottom={0.08} height={postH} color={metal} metalness={0.6} roughness={0.3} />
+   891→      <Cyl position={[w * 0.4, postH / 2, 0]} radiusTop={0.08} radiusBottom={0.08} height={postH} color={metal} metalness={0.6} roughness={0.3} />
+   892→      {/* Horizontal bar — cylinder rotated to lie along X */}
+   893→      <Cyl position={[0, postH - 0.2, 0]} rotation={[0, 0, Math.PI / 2]} radiusTop={0.06} radiusBottom={0.06} height={w * 0.8} color={metal} metalness={0.6} roughness={0.3} />
+   894→      {/* Base feet */}
+   895→      <Box position={[-w * 0.4, 0.05, 0]} size={[0.4, 0.1, l * 0.6]} color={metal} metalness={0.6} roughness={0.3} />
+   896→      <Box position={[w * 0.4, 0.05, 0]} size={[0.4, 0.1, l * 0.6]} color={metal} metalness={0.6} roughness={0.3} />
+   897→      {/* Hanging garments */}
+   898→      {[-w * 0.22, 0, w * 0.22].map((gx, i) => {
+   899→        const gColor = [garment1, garment2, garment3][i];
+   900→        return (
+   901→          <group key={i} position={[gx, 0, 0]}>
+   902→            {/* Hanger triangle (suggested by a thin box) */}
+   903→            <Box position={[0, postH - 0.7, 0]} size={[0.4, 0.04, 0.04]} color={metal} metalness={0.6} />
+   904→            {/* Garment body */}
+   905→            <Box position={[0, postH - 2, 0]} size={[0.5, 2.4, 0.25]} color={gColor} roughness={0.85} />
+   906→          </group>
+   907→        );
+   908→      })}
+   909→    </group>
+   910→  );
+   911→}
+   912→
+   913→function MeetingTableModel({ w, l, color }: ModelProps) {
+   914→  // Same as a large rectangular table at dining height.
+   915→  return <TableRectModel w={w} l={l} color={color} height={2.5} />;
+   916→}
+   917→
+   918→// ---- Default fallback ----------------------------------------------------
+   919→
+   920→function DefaultBoxModel({ w, l, color }: ModelProps) {
+   921→  return (
+   922→    <group>
+   923→      <Box position={[0, 0.75, 0]} size={[w * 0.9, 1.5, l * 0.9]} color={color} />
+   924→    </group>
+   925→  );
+   926→}
+   927→
+   928→// -------------------------------------------------------------------------
+   929→// Dispatcher — picks the right model for a FurnitureType.
+   930→// -------------------------------------------------------------------------
+   931→
+   932→function buildFurnitureModel(
+   933→  type: FurnitureType,
+   934→  w: number,
+   935→  l: number,
+   936→  color: string,
+   937→): React.ReactNode {
+   938→  switch (type) {
+   939→    case 'bed-single':
+   940→    case 'bed-double':
+   941→    case 'bed-king':
+   942→      return <BedModel w={w} l={l} color={color} />;
+   943→    case 'sofa-2':
+   944→    case 'sofa-3':
+   945→      return <SofaModel w={w} l={l} color={color} />;
+   946→    case 'sofa-l':
+   947→      return <SofaLModel w={w} l={l} color={color} />;
+   948→    case 'armchair':
+   949→      return <ArmchairModel w={w} l={l} color={color} />;
+   950→    case 'chair-dining':
+   951→      return <ChairDiningModel w={w} l={l} color={color} />;
+   952→    case 'chair-office':
+   953→      return <ChairOfficeModel w={w} l={l} color={color} />;
+   954→    case 'bar-stool':
+   955→      return <BarStoolModel w={w} l={l} color={color} />;
+   956→    case 'table-round':
+   957→      return <TableRoundModel w={w} l={l} color={color} />;
+   958→    case 'table-rect':
+   959→      return <TableRectModel w={w} l={l} color={color} height={2.5} />;
+   960→    case 'table-coffee':
+   961→      return <TableRectModel w={w} l={l} color={color} height={1.5} />;
+   962→    case 'table-dining-6':
+   963→      return <TableRectModel w={w} l={l} color={color} height={2.5} />;
+   964→    case 'meeting-table':
+   965→      return <MeetingTableModel w={w} l={l} color={color} />;
+   966→    case 'desk':
+   967→      return <DeskModel w={w} l={l} color={color} />;
+   968→    case 'wardrobe':
+   969→      return <WardrobeModel w={w} l={l} color={color} />;
+   970→    case 'bookshelf':
+   971→    case 'shelf-wall':
+   972→      return <ShelfModel w={w} l={l} color={color} />;
+   973→    case 'display-shelf':
+   974→      return <DisplayShelfModel w={w} l={l} color={color} />;
+   975→    case 'tv-unit':
+   976→      return <TvUnitModel w={w} l={l} color={color} />;
+   977→    case 'tv-wall':
+   978→      return <TvWallModel w={w} l={l} color={color} />;
+   979→    case 'kitchen-counter':
+   980→    case 'service-counter':
+   981→    case 'reception-desk':
+   982→      return <CounterModel w={w} l={l} color={color} />;
+   983→    case 'kitchen-island':
+   984→      return <KitchenIslandModel w={w} l={l} color={color} />;
+   985→    case 'stove':
+   986→      return <StoveModel w={w} l={l} color={color} />;
+   987→    case 'sink-kitchen':
+   988→      return <SinkKitchenModel w={w} l={l} color={color} />;
+   989→    case 'fridge':
+   990→      return <FridgeModel w={w} l={l} color={color} />;
+   991→    case 'toilet':
+   992→      return <ToiletModel w={w} l={l} color={color} />;
+   993→    case 'bathtub':
+   994→      return <BathtubModel w={w} l={l} color={color} />;
+   995→    case 'shower':
+   996→      return <ShowerModel w={w} l={l} color={color} />;
+   997→    case 'vanity':
+   998→      return <VanityModel w={w} l={l} color={color} />;
+   999→    case 'washer':
+  1000→      return <WasherModel w={w} l={l} color={color} />;
+  1001→    case 'plant-small':
+  1002→      return <PlantModel w={w} l={l} color={color} />;
+  1003→    case 'plant-large':
+  1004→      return <PlantModel w={w} l={l} color={color} large />;
+  1005→    case 'rug':
+  1006→      return <RugModel w={w} l={l} color={color} />;
+  1007→    case 'lamp-floor':
+  1008→      return <LampFloorModel w={w} l={l} color={color} />;
+  1009→    case 'pooja-altar':
+  1010→      return <PoojaAltarModel w={w} l={l} color={color} />;
+  1011→    case 'dining-set-4':
+  1012→      return <DiningSetModel w={w} l={l} color={color} chairs={4} />;
+  1013→    case 'dining-set-6':
+  1014→      return <DiningSetModel w={w} l={l} color={color} chairs={6} />;
+  1015→    case 'office-cabin':
+  1016→      return <OfficeCabinModel w={w} l={l} color={color} />;
+  1017→    case 'clothing-rack':
+  1018→      return <ClothingRackModel w={w} l={l} color={color} />;
+  1019→    case 'car':
+  1020→      return <CarModel w={w} l={l} color={color} />;
+  1021→    case 'bike':
+  1022→      return <BikeModel w={w} l={l} color={color} />;
+  1023→    default:
+  1024→      return <DefaultBoxModel w={w} l={l} color={color} />;
+  1025→  }
+  1026→}
+  1027→
+  1028→// ---- Car (top-down, length along Z) ----
+  1029→function CarModel({ w, l, color }: ModelProps) {
+  1030→  const body = color;
+  1031→  const dark = '#1a1a1a';
+  1032→  const glass = '#9ec5ff';
+  1033→  return (
+  1034→    <group>
+  1035→      {/* Body */}
+  1036→      <Box size={[w, 1.8, l]} position={[0, 1, 0]} color={body} roughness={0.35} metalness={0.5} />
+  1037→      {/* Cabin (roof) */}
+  1038→      <Box size={[w * 0.8, 1.2, l * 0.45]} position={[0, 2.4, 0]} color={darkenHex(body, 0.15)} roughness={0.3} metalness={0.4} />
+  1039→      {/* Windshield front (south, +Z) */}
+  1040→      <Box size={[w * 0.78, 1.0, 0.1]} position={[0, 2.4, l * 0.225]} color={glass} opacity={0.55} roughness={0.05} metalness={0.1} />
+  1041→      {/* Windshield rear */}
+  1042→      <Box size={[w * 0.78, 1.0, 0.1]} position={[0, 2.4, -l * 0.225]} color={glass} opacity={0.55} roughness={0.05} metalness={0.1} />
+  1043→      {/* Side windows */}
+  1044→      <Box size={[0.08, 0.9, l * 0.42]} position={[w * 0.4, 2.4, 0]} color={glass} opacity={0.5} />
+  1045→      <Box size={[0.08, 0.9, l * 0.42]} position={[-w * 0.4, 2.4, 0]} color={glass} opacity={0.5} />
+  1046→      {/* Wheels (4) — rotated cylinders (axle along X) */}
+  1047→      {[
+  1048→        [w * 0.42, 0.5, l * 0.32],
+  1049→        [-w * 0.42, 0.5, l * 0.32],
+  1050→        [w * 0.42, 0.5, -l * 0.32],
+  1051→        [-w * 0.42, 0.5, -l * 0.32],
+  1052→      ].map((p, i) => (
+  1053→        <Cyl key={i} radiusTop={0.5} radiusBottom={0.5} height={0.4} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.8} />
+  1054→      ))}
+  1055→      {/* Headlights */}
+  1056→      <Box size={[w * 0.7, 0.3, 0.1]} position={[0, 1.2, l / 2]} color="#fff8d0" />
+  1057→      {/* Tail lights */}
+  1058→      <Box size={[w * 0.7, 0.3, 0.1]} position={[0, 1.2, -l / 2]} color="#5a1010" />
+  1059→    </group>
+  1060→  );
+  1061→}
+  1062→
+  1063→// ---- Bike (motorcycle, top-down, length along Z) ----
+  1064→function BikeModel({ w, l, color }: ModelProps) {
+  1065→  const dark = '#1a1a1a';
+  1066→  const seat = '#2a1a0a';
+  1067→  return (
+  1068→    <group>
+  1069→      {/* Main body */}
+  1070→      <Box size={[w * 0.5, 1.5, l * 0.7]} position={[0, 1.2, 0]} color={color} roughness={0.4} metalness={0.5} />
+  1071→      {/* Fuel tank */}
+  1072→      <Box size={[w * 0.45, 0.8, l * 0.25]} position={[0, 2.0, l * 0.05]} color={darkenHex(color, 0.2)} roughness={0.3} metalness={0.6} />
+  1073→      {/* Seat */}
+  1074→      <Box size={[w * 0.4, 0.4, l * 0.2]} position={[0, 1.9, -l * 0.2]} color={seat} roughness={0.7} />
+  1075→      {/* Handlebar */}
+  1076→      <Cyl radiusTop={0.08} radiusBottom={0.08} height={w * 0.7} position={[0, 2.2, l * 0.35]} rotation={[0, 0, Math.PI / 2]} color={dark} />
+  1077→      {/* Headlight */}
+  1078→      <Cyl radiusTop={0.25} radiusBottom={0.25} height={0.15} position={[0, 1.6, l / 2]} rotation={[Math.PI / 2, 0, 0]} color="#ffe08a" />
+  1079→      {/* Wheels (2) */}
+  1080→      <Cyl radiusTop={0.6} radiusBottom={0.6} height={0.2} position={[0, 0.6, l * 0.38]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.85} />
+  1081→      <Cyl radiusTop={0.6} radiusBottom={0.6} height={0.2} position={[0, 0.6, -l * 0.38]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.85} />
+  1082→    </group>
+  1083→  );
+  1084→}
+  1085→
+  1086→function darkenHex(hex: string, amount: number): string {
+  1087→  const h = hex.replace('#', '');
+  1088→  const r = parseInt(h.slice(0, 2), 16);
+  1089→  const g = parseInt(h.slice(2, 4), 16);
+  1090→  const b = parseInt(h.slice(4, 6), 16);
+  1091→  const dr = Math.round(r * (1 - amount));
+  1092→  const dg = Math.round(g * (1 - amount));
+  1093→  const db = Math.round(b * (1 - amount));
+  1094→  return '#' + [dr, dg, db].map((x) => x.toString(16).padStart(2, '0')).join('');
+  1095→}
+  1096→

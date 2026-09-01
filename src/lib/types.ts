@@ -89,6 +89,7 @@ export interface DoorMarker {
   wall: 'top' | 'right' | 'bottom' | 'left';
   pos: number; // 0..1 along the wall
   width: number; // in units (e.g. 3ft)
+  swing: 'in-left' | 'in-right' | 'out-left' | 'out-right'; // door swing direction
 }
 
 export interface WindowMarker {

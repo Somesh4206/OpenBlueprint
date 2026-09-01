@@ -35,7 +35,7 @@ export const demoLayout: LayoutData = {
       width: 14,
       length: 14,
       floor: 0,
-      doors: [{ wall: 'bottom', pos: 0.5, width: 3 }],
+      doors: [{ wall: 'bottom', pos: 0.5, width: 3, swing: 'in-right' as const }],
       windows: [
         { wall: 'left', pos: 0.5, width: 4 },
         { wall: 'top', pos: 0.5, width: 5 },
@@ -50,7 +50,7 @@ export const demoLayout: LayoutData = {
       width: 8,
       length: 8,
       floor: 0,
-      doors: [{ wall: 'bottom', pos: 0.5, width: 2.5 }],
+      doors: [{ wall: 'bottom', pos: 0.5, width: 2.5, swing: 'in-right' as const }],
       windows: [{ wall: 'top', pos: 0.5, width: 2 }],
     },
     {
@@ -62,7 +62,7 @@ export const demoLayout: LayoutData = {
       width: 15,
       length: 12,
       floor: 0,
-      doors: [{ wall: 'right', pos: 0.5, width: 3 }],
+      doors: [{ wall: 'right', pos: 0.5, width: 3, swing: 'in-right' as const }],
       windows: [{ wall: 'left', pos: 0.5, width: 4 }],
     },
     {
@@ -74,7 +74,7 @@ export const demoLayout: LayoutData = {
       width: 15,
       length: 12,
       floor: 0,
-      doors: [{ wall: 'bottom', pos: 0.3, width: 3 }],
+      doors: [{ wall: 'bottom', pos: 0.3, width: 3, swing: 'in-right' as const }],
       windows: [{ wall: 'right', pos: 0.5, width: 4 }],
     },
     {
@@ -86,7 +86,7 @@ export const demoLayout: LayoutData = {
       width: 20,
       length: 14,
       floor: 0,
-      doors: [{ wall: 'top', pos: 0.5, width: 3.5 }],
+      doors: [{ wall: 'top', pos: 0.5, width: 3.5, swing: 'in-right' as const }],
       windows: [
         { wall: 'left', pos: 0.5, width: 5 },
         { wall: 'bottom', pos: 0.4, width: 6 },

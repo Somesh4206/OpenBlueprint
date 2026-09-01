@@ -20,7 +20,9 @@
 // (headboard, sofa backrest, chair backrest, etc.).
 // =========================================================================
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
 import type { FurnitureItem, FurnitureType } from '@/lib/types';
 
 // -------------------------------------------------------------------------
@@ -1025,60 +1027,492 @@ function buildFurnitureModel(
   }
 }
 
-// ---- Car (top-down, length along Z) ----
+// ---- Car (top-down, length along Z, +Z = front) ----
+//
+// Realistic sedan/SUV silhouette:
+//   - Lower chassis box + slightly tapered hood + trunk (all metallic paint)
+//   - Narrower raised cabin with slanted front & rear windshields (dark glass)
+//   - 4 dark tires with lighter hubs at the corners
+//   - Bright emissive headlights at front, red emissive taillights at rear
+//   - Front grille + chrome side mirrors
+//   - Body (chassis + cabin + lights) gently bobs up/down ±0.1ft on sin(t*2)
+//     to feel "alive"; wheels stay grounded (suspension look).
 function CarModel({ w, l, color }: ModelProps) {
+  const bodyRef = useRef<THREE.Group>(null);
+
   const body = color;
+  const bodyDark = darkenHex(body, 0.18);
   const dark = '#1a1a1a';
-  const glass = '#9ec5ff';
+  const glass = '#1a2a3a';
+  const chrome = '#9aa0a6';
+  const hub = '#888888';
+
+  // Geometry constants
+  const wheelRadius = 0.55;
+  const wheelWidth = 0.5;
+  const wheelY = wheelRadius;
+  const wheelX = w * 0.46;
+  const wheelZFront = l * 0.32;
+  const wheelZRear = -l * 0.32;
+  const tilt = 0.5; // windshield rake (radians)
+
+  // Wheel positions: front-left, front-right, rear-left, rear-right
+  const wheelPositions: [number, number, number][] = [
+    [-wheelX, wheelY, wheelZFront],
+    [wheelX, wheelY, wheelZFront],
+    [-wheelX, wheelY, wheelZRear],
+    [wheelX, wheelY, wheelZRear],
+  ];
+
+  useFrame((state) => {
+    if (!bodyRef.current) return;
+    const t = state.clock.elapsedTime;
+    // Gentle vertical bob ±0.1ft
+    bodyRef.current.position.y = Math.sin(t * 2) * 0.1;
+    // Subtle roll for a more "alive" feel
+    bodyRef.current.rotation.z = Math.sin(t * 2 + 0.4) * 0.012;
+  });
+
   return (
     <group>
-      {/* Body */}
-      <Box size={[w, 1.8, l]} position={[0, 1, 0]} color={body} roughness={0.35} metalness={0.5} />
-      {/* Cabin (roof) */}
-      <Box size={[w * 0.8, 1.2, l * 0.45]} position={[0, 2.4, 0]} color={darkenHex(body, 0.15)} roughness={0.3} metalness={0.4} />
-      {/* Windshield front (south, +Z) */}
-      <Box size={[w * 0.78, 1.0, 0.1]} position={[0, 2.4, l * 0.225]} color={glass} opacity={0.55} roughness={0.05} metalness={0.1} />
-      {/* Windshield rear */}
-      <Box size={[w * 0.78, 1.0, 0.1]} position={[0, 2.4, -l * 0.225]} color={glass} opacity={0.55} roughness={0.05} metalness={0.1} />
-      {/* Side windows */}
-      <Box size={[0.08, 0.9, l * 0.42]} position={[w * 0.4, 2.4, 0]} color={glass} opacity={0.5} />
-      <Box size={[0.08, 0.9, l * 0.42]} position={[-w * 0.4, 2.4, 0]} color={glass} opacity={0.5} />
-      {/* Wheels (4) — rotated cylinders (axle along X) */}
-      {[
-        [w * 0.42, 0.5, l * 0.32],
-        [-w * 0.42, 0.5, l * 0.32],
-        [w * 0.42, 0.5, -l * 0.32],
-        [-w * 0.42, 0.5, -l * 0.32],
-      ].map((p, i) => (
-        <Cyl key={i} radiusTop={0.5} radiusBottom={0.5} height={0.4} position={p as [number, number, number]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.8} />
+      {/* ----- Bobbing body group (chassis + cabin + lights) ----- */}
+      <group ref={bodyRef}>
+        {/* Lower main chassis (long, full-width) */}
+        <Box
+          position={[0, 1.0, 0]}
+          size={[w, 1.5, l * 0.92]}
+          color={body}
+          roughness={0.3}
+          metalness={0.6}
+        />
+        {/* Hood — slightly tapered (narrower + lower) at the front */}
+        <Box
+          position={[0, 1.15, l * 0.34]}
+          size={[w * 0.92, 1.1, l * 0.2]}
+          color={bodyDark}
+          roughness={0.3}
+          metalness={0.6}
+        />
+        {/* Trunk — slightly tapered at the rear */}
+        <Box
+          position={[0, 1.15, -l * 0.34]}
+          size={[w * 0.92, 1.1, l * 0.2]}
+          color={bodyDark}
+          roughness={0.3}
+          metalness={0.6}
+        />
+        {/* Cabin / roof — narrower, raised, sits over the middle of the car */}
+        <Box
+          position={[0, 2.35, l * 0.02]}
+          size={[w * 0.84, 1.05, l * 0.46]}
+          color={bodyDark}
+          roughness={0.3}
+          metalness={0.6}
+        />
+        {/* Front windshield — slanted (top leans toward rear / -Z) */}
+        <Box
+          position={[0, 2.35, l * 0.255]}
+          size={[w * 0.82, 1.05, 0.06]}
+          color={glass}
+          roughness={0.05}
+          metalness={0.3}
+          opacity={0.7}
+          rotation={[-tilt, 0, 0]}
+        />
+        {/* Rear windshield — slanted (top leans toward front / +Z) */}
+        <Box
+          position={[0, 2.35, -l * 0.215]}
+          size={[w * 0.82, 1.05, 0.06]}
+          color={glass}
+          roughness={0.05}
+          metalness={0.3}
+          opacity={0.7}
+          rotation={[tilt, 0, 0]}
+        />
+        {/* Side windows */}
+        <Box
+          position={[w * 0.42, 2.4, l * 0.02]}
+          size={[0.06, 0.85, l * 0.42]}
+          color={glass}
+          roughness={0.05}
+          metalness={0.3}
+          opacity={0.7}
+        />
+        <Box
+          position={[-w * 0.42, 2.4, l * 0.02]}
+          size={[0.06, 0.85, l * 0.42]}
+          color={glass}
+          roughness={0.05}
+          metalness={0.3}
+          opacity={0.7}
+        />
+        {/* Side mirrors (chrome) */}
+        <Box
+          position={[w * 0.46, 2.3, l * 0.22]}
+          size={[0.18, 0.15, 0.12]}
+          color={chrome}
+          roughness={0.3}
+          metalness={0.7}
+        />
+        <Box
+          position={[-w * 0.46, 2.3, l * 0.22]}
+          size={[0.18, 0.15, 0.12]}
+          color={chrome}
+          roughness={0.3}
+          metalness={0.7}
+        />
+        {/* Front grille — thin dark slab */}
+        <Box
+          position={[0, 0.92, l * 0.462]}
+          size={[w * 0.6, 0.32, 0.08]}
+          color="#0e0e0e"
+          roughness={0.6}
+          metalness={0.3}
+        />
+        {/* Headlights — bright, emissive warm white */}
+        <mesh position={[w * 0.27, 1.25, l * 0.462]} castShadow>
+          <boxGeometry args={[0.55, 0.26, 0.06]} />
+          <meshStandardMaterial
+            color="#fff8d0"
+            emissive="#ffe08a"
+            emissiveIntensity={0.6}
+            roughness={0.2}
+            metalness={0.1}
+          />
+        </mesh>
+        <mesh position={[-w * 0.27, 1.25, l * 0.462]} castShadow>
+          <boxGeometry args={[0.55, 0.26, 0.06]} />
+          <meshStandardMaterial
+            color="#fff8d0"
+            emissive="#ffe08a"
+            emissiveIntensity={0.6}
+            roughness={0.2}
+            metalness={0.1}
+          />
+        </mesh>
+        {/* Taillights — emissive red */}
+        <mesh position={[w * 0.27, 1.25, -l * 0.462]} castShadow>
+          <boxGeometry args={[0.55, 0.26, 0.06]} />
+          <meshStandardMaterial
+            color="#5a1010"
+            emissive="#cc2020"
+            emissiveIntensity={0.4}
+            roughness={0.3}
+            metalness={0.1}
+          />
+        </mesh>
+        <mesh position={[-w * 0.27, 1.25, -l * 0.462]} castShadow>
+          <boxGeometry args={[0.55, 0.26, 0.06]} />
+          <meshStandardMaterial
+            color="#5a1010"
+            emissive="#cc2020"
+            emissiveIntensity={0.4}
+            roughness={0.3}
+            metalness={0.1}
+          />
+        </mesh>
+      </group>
+
+      {/* ----- Wheels (outside bodyRef so they stay on the ground) ----- */}
+      {wheelPositions.map((p, i) => (
+        <group key={i} position={p}>
+          {/* Tire */}
+          <Cyl
+            rotation={[0, 0, Math.PI / 2]}
+            radiusTop={wheelRadius}
+            radiusBottom={wheelRadius}
+            height={wheelWidth}
+            color={dark}
+            roughness={0.85}
+            metalness={0.1}
+            radialSegments={22}
+          />
+          {/* Hub (lighter, slightly proud of tire on both sides — hubcap) */}
+          <Cyl
+            rotation={[0, 0, Math.PI / 2]}
+            radiusTop={wheelRadius * 0.55}
+            radiusBottom={wheelRadius * 0.55}
+            height={wheelWidth + 0.02}
+            color={hub}
+            roughness={0.4}
+            metalness={0.7}
+            radialSegments={12}
+          />
+        </group>
       ))}
-      {/* Headlights */}
-      <Box size={[w * 0.7, 0.3, 0.1]} position={[0, 1.2, l / 2]} color="#fff8d0" />
-      {/* Tail lights */}
-      <Box size={[w * 0.7, 0.3, 0.1]} position={[0, 1.2, -l / 2]} color="#5a1010" />
     </group>
   );
 }
 
-// ---- Bike (motorcycle, top-down, length along Z) ----
+// ---- Bike (motorcycle, top-down, length along Z, +Z = front) ----
+//
+// Realistic motorcycle silhouette:
+//   - Narrow frame box along Z (metallic paint)
+//   - Raised fuel tank in the middle with a curved (half-cylinder) top
+//   - Darker engine block under the tank, leather seat behind
+//   - Handlebar (across X) + 2 tilted front forks
+//   - 2 wheels (radius 0.55) with dark tires + lighter hubs; the front wheel
+//     has visible spokes so its spin animation reads clearly
+//   - Bright emissive spherical headlight + chrome ring housing at the front
+//   - Metallic-silver exhaust pipe running along the right side
+//   - Front wheel spins slowly around its axle; the whole body has a subtle
+//     lean (±0.03 rad roll) to feel "alive".
 function BikeModel({ w, l, color }: ModelProps) {
-  const dark = '#1a1a1a';
+  const bodyRef = useRef<THREE.Group>(null);
+  const frontWheelRef = useRef<THREE.Group>(null);
+
+  const frame = color;
+  const frameDark = darkenHex(color, 0.25);
   const seat = '#2a1a0a';
+  const dark = '#1a1a1a';
+  const engine = '#333333';
+  const silver = '#cccccc';
+  const hub = '#888888';
+
+  // Geometry constants
+  const wheelRadius = 0.55;
+  const wheelWidth = 0.15;
+  const wheelY = wheelRadius;
+  const wheelZFront = l * 0.36;
+  const wheelZRear = -l * 0.38;
+
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    // Front wheel slow spin around its axle (local X = world X of the group)
+    if (frontWheelRef.current) {
+      frontWheelRef.current.rotation.x = t * 2.5;
+    }
+    // Subtle body lean (±0.03 rad roll)
+    if (bodyRef.current) {
+      bodyRef.current.rotation.z = Math.sin(t * 1.5) * 0.03;
+    }
+  });
+
   return (
-    <group>
-      {/* Main body */}
-      <Box size={[w * 0.5, 1.5, l * 0.7]} position={[0, 1.2, 0]} color={color} roughness={0.4} metalness={0.5} />
-      {/* Fuel tank */}
-      <Box size={[w * 0.45, 0.8, l * 0.25]} position={[0, 2.0, l * 0.05]} color={darkenHex(color, 0.2)} roughness={0.3} metalness={0.6} />
-      {/* Seat */}
-      <Box size={[w * 0.4, 0.4, l * 0.2]} position={[0, 1.9, -l * 0.2]} color={seat} roughness={0.7} />
-      {/* Handlebar */}
-      <Cyl radiusTop={0.08} radiusBottom={0.08} height={w * 0.7} position={[0, 2.2, l * 0.35]} rotation={[0, 0, Math.PI / 2]} color={dark} />
-      {/* Headlight */}
-      <Cyl radiusTop={0.25} radiusBottom={0.25} height={0.15} position={[0, 1.6, l / 2]} rotation={[Math.PI / 2, 0, 0]} color="#ffe08a" />
-      {/* Wheels (2) */}
-      <Cyl radiusTop={0.6} radiusBottom={0.6} height={0.2} position={[0, 0.6, l * 0.38]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.85} />
-      <Cyl radiusTop={0.6} radiusBottom={0.6} height={0.2} position={[0, 0.6, -l * 0.38]} rotation={[0, 0, Math.PI / 2]} color={dark} roughness={0.85} />
+    <group ref={bodyRef}>
+      {/* Main frame / body — narrow box along Z */}
+      <Box
+        position={[0, 1.1, 0]}
+        size={[w * 0.45, 0.9, l * 0.7]}
+        color={frame}
+        roughness={0.4}
+        metalness={0.5}
+      />
+      {/* Engine block (darker, sits under the tank) */}
+      <Box
+        position={[0, 0.65, l * 0.05]}
+        size={[w * 0.5, 0.7, l * 0.22]}
+        color={engine}
+        roughness={0.6}
+        metalness={0.5}
+      />
+      {/* Fuel tank — raised, slightly wider than frame */}
+      <Box
+        position={[0, 1.7, l * 0.08]}
+        size={[w * 0.5, 0.7, l * 0.22]}
+        color={frameDark}
+        roughness={0.3}
+        metalness={0.6}
+      />
+      {/* Curved top of tank — half-buried cylinder (axis along Z) */}
+      <Cyl
+        position={[0, 1.95, l * 0.08]}
+        rotation={[Math.PI / 2, 0, 0]}
+        radiusTop={w * 0.25}
+        radiusBottom={w * 0.25}
+        height={l * 0.22}
+        color={frameDark}
+        roughness={0.3}
+        metalness={0.6}
+        radialSegments={16}
+      />
+      {/* Seat — dark leather, behind the tank */}
+      <Box
+        position={[0, 1.55, -l * 0.18]}
+        size={[w * 0.4, 0.35, l * 0.22]}
+        color={seat}
+        roughness={0.7}
+        metalness={0.1}
+      />
+      {/* Rear fender over the rear wheel */}
+      <Box
+        position={[0, 1.25, -l * 0.32]}
+        size={[w * 0.42, 0.12, l * 0.18]}
+        color={frameDark}
+        roughness={0.4}
+        metalness={0.5}
+      />
+      {/* Handlebar — thin cylinder across the front (axle along X) */}
+      <Cyl
+        position={[0, 2.15, l * 0.32]}
+        rotation={[0, 0, Math.PI / 2]}
+        radiusTop={0.06}
+        radiusBottom={0.06}
+        height={w * 0.7}
+        color={dark}
+        roughness={0.5}
+        metalness={0.6}
+      />
+      {/* Handlebar grips (darker, slightly fatter ends) */}
+      <Cyl
+        position={[w * 0.32, 2.15, l * 0.34]}
+        rotation={[0, 0, Math.PI / 2]}
+        radiusTop={0.09}
+        radiusBottom={0.09}
+        height={0.18}
+        color="#0e0e0e"
+        roughness={0.7}
+      />
+      <Cyl
+        position={[-w * 0.32, 2.15, l * 0.34]}
+        rotation={[0, 0, Math.PI / 2]}
+        radiusTop={0.09}
+        radiusBottom={0.09}
+        height={0.18}
+        color="#0e0e0e"
+        roughness={0.7}
+      />
+      {/* Front fork — 2 thin cylinders tilted forward (-0.15 rad around X) */}
+      <Cyl
+        position={[w * 0.12, 1.35, l * 0.34]}
+        rotation={[-0.15, 0, 0]}
+        radiusTop={0.07}
+        radiusBottom={0.07}
+        height={1.7}
+        color="#555555"
+        roughness={0.4}
+        metalness={0.8}
+      />
+      <Cyl
+        position={[-w * 0.12, 1.35, l * 0.34]}
+        rotation={[-0.15, 0, 0]}
+        radiusTop={0.07}
+        radiusBottom={0.07}
+        height={1.7}
+        color="#555555"
+        roughness={0.4}
+        metalness={0.8}
+      />
+      {/* Exhaust pipe — metallic silver, along the right side (axis along Z) */}
+      <Cyl
+        position={[w * 0.28, 0.55, -l * 0.05]}
+        rotation={[Math.PI / 2, 0, 0]}
+        radiusTop={0.12}
+        radiusBottom={0.12}
+        height={l * 0.45}
+        color={silver}
+        roughness={0.1}
+        metalness={0.9}
+      />
+      {/* Exhaust tip (slightly wider, brighter) */}
+      <Cyl
+        position={[w * 0.28, 0.55, -l * 0.27]}
+        rotation={[Math.PI / 2, 0, 0]}
+        radiusTop={0.16}
+        radiusBottom={0.16}
+        height={0.12}
+        color="#dddddd"
+        roughness={0.1}
+        metalness={0.95}
+      />
+      {/* Headlight housing — dark chrome ring (axis along Z) */}
+      <Cyl
+        position={[0, 1.7, l * 0.40]}
+        rotation={[Math.PI / 2, 0, 0]}
+        radiusTop={0.26}
+        radiusBottom={0.26}
+        height={0.06}
+        color="#222222"
+        roughness={0.5}
+        metalness={0.6}
+      />
+      {/* Headlight bulb — bright emissive sphere at the front */}
+      <mesh position={[0, 1.7, l * 0.42]} castShadow>
+        <sphereGeometry args={[0.22, 16, 16]} />
+        <meshStandardMaterial
+          color="#ffe08a"
+          emissive="#ffe08a"
+          emissiveIntensity={0.7}
+          roughness={0.2}
+          metalness={0.3}
+        />
+      </mesh>
+      {/* Tail light — small emissive red box at the rear */}
+      <mesh position={[0, 1.25, -l * 0.46]} castShadow>
+        <boxGeometry args={[0.12, 0.1, 0.06]} />
+        <meshStandardMaterial
+          color="#5a1010"
+          emissive="#cc2020"
+          emissiveIntensity={0.5}
+          roughness={0.3}
+          metalness={0.1}
+        />
+      </mesh>
+
+      {/* ----- Rear wheel (static) ----- */}
+      <group position={[0, wheelY, wheelZRear]}>
+        <Cyl
+          rotation={[0, 0, Math.PI / 2]}
+          radiusTop={wheelRadius}
+          radiusBottom={wheelRadius}
+          height={wheelWidth}
+          color={dark}
+          roughness={0.85}
+          metalness={0.1}
+          radialSegments={20}
+        />
+        <Cyl
+          rotation={[0, 0, Math.PI / 2]}
+          radiusTop={wheelRadius * 0.5}
+          radiusBottom={wheelRadius * 0.5}
+          height={wheelWidth + 0.02}
+          color={hub}
+          roughness={0.4}
+          metalness={0.7}
+          radialSegments={10}
+        />
+      </group>
+
+      {/* ----- Front wheel (spinning, with visible spokes) ----- */}
+      <group ref={frontWheelRef} position={[0, wheelY, wheelZFront]}>
+        {/* Tire */}
+        <Cyl
+          rotation={[0, 0, Math.PI / 2]}
+          radiusTop={wheelRadius}
+          radiusBottom={wheelRadius}
+          height={wheelWidth}
+          color={dark}
+          roughness={0.85}
+          metalness={0.1}
+          radialSegments={20}
+        />
+        {/* Hub */}
+        <Cyl
+          rotation={[0, 0, Math.PI / 2]}
+          radiusTop={wheelRadius * 0.5}
+          radiusBottom={wheelRadius * 0.5}
+          height={wheelWidth + 0.02}
+          color={hub}
+          roughness={0.4}
+          metalness={0.7}
+          radialSegments={10}
+        />
+        {/* Two cross-spokes (in YZ plane) so the spin animation is visible */}
+        <Box
+          position={[0, 0, 0]}
+          size={[0.04, wheelRadius * 1.8, 0.16]}
+          color="#aaaaaa"
+          roughness={0.4}
+          metalness={0.6}
+        />
+        <Box
+          position={[0, 0, 0]}
+          size={[0.04, 0.16, wheelRadius * 1.8]}
+          color="#aaaaaa"
+          roughness={0.4}
+          metalness={0.6}
+        />
+      </group>
     </group>
   );
 }
