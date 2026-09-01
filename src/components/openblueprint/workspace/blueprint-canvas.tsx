@@ -132,10 +132,30 @@ export function BlueprintCanvas({
       return;
     }
     if (drag) return;
-    const target = (e.target as Element);
+    // Walk up the DOM from the click target to find data-* attributes on ancestors.
+    // This is needed because clicks on child elements (rect, circle inside <g>) don't
+    // have the attributes on the child — they're on the parent <g>.
+    let target = e.target as Element;
+    let furnitureId: string | null = null;
+    let furnitureHandle: string | null = null;
+    let doorRoomId: string | null = null;
+    let doorIndexAttr: string | null = null;
+    let roomId: string | null = null;
+    let roomHandle: string | null = null;
+    let walkNode: Element | null = target;
+    while (walkNode && walkNode !== svgRef.current) {
+      if (walkNode.getAttribute) {
+        if (!furnitureId) furnitureId = walkNode.getAttribute('data-furniture-id');
+        if (!furnitureHandle) furnitureHandle = walkNode.getAttribute('data-furniture-handle');
+        if (!doorRoomId) doorRoomId = walkNode.getAttribute('data-door-room-id');
+        if (doorIndexAttr === null) doorIndexAttr = walkNode.getAttribute('data-door-index');
+        if (!roomId) roomId = walkNode.getAttribute('data-room-id');
+        if (!roomHandle) roomHandle = walkNode.getAttribute('data-handle');
+      }
+      walkNode = walkNode.parentElement;
+    }
+
     // door hit-test (doors on selected rooms are draggable)
-    const doorRoomId = target.getAttribute('data-door-room-id');
-    const doorIndexAttr = target.getAttribute('data-door-index');
     if (doorRoomId && doorIndexAttr !== null) {
       const di = parseInt(doorIndexAttr, 10);
       const room = layout.rooms.find((r) => r.id === doorRoomId);
@@ -147,13 +167,11 @@ export function BlueprintCanvas({
           startMouse: { x: e.clientX, y: e.clientY },
           startRoom: { ...room },
         });
-        (e.target as Element).setPointerCapture(e.pointerId);
+        (target as Element).setPointerCapture(e.pointerId);
         return;
       }
     }
     // furniture hit-test (furniture renders on top)
-    const furnitureId = target.getAttribute('data-furniture-id');
-    const furnitureHandle = target.getAttribute('data-furniture-handle');
     if (furnitureId) {
       const f = layout.furniture.find((x) => x.id === furnitureId);
       if (f) {
@@ -175,18 +193,17 @@ export function BlueprintCanvas({
       }
     }
     // room hit-test
-    const roomId = target.getAttribute('data-room-id');
-    const handle = target.getAttribute('data-handle') as DragMode;
     if (roomId) {
       const room = layout.rooms.find((r) => r.id === roomId);
       if (room) {
         onSelectRoom(room.id);
+        const handle = roomHandle as DragMode;
         if (handle) {
           setDrag({ roomId, mode: handle, startMouse: { x: e.clientX, y: e.clientY }, startRoom: { ...room } });
         } else if (tool === 'select' || tool === 'room') {
           setDrag({ roomId, mode: 'move', startMouse: { x: e.clientX, y: e.clientY }, startRoom: { ...room } });
         }
-        (e.target as Element).setPointerCapture(e.pointerId);
+        (target as Element).setPointerCapture(e.pointerId);
       }
     } else {
       if (tool === 'room') {
@@ -237,9 +254,11 @@ export function BlueprintCanvas({
       return;
     }
     if (drag.mode === 'furniture-rotate' && drag.startFurniture) {
-      // rotate by 90° on significant horizontal drag
+      // Rotate: use raw pixel delta for responsiveness — each 40px of drag = 90°
       const f = drag.startFurniture;
-      const newRot = ((Math.round((f.rotation + dx) / 90) * 90) % 360 + 360) % 360;
+      const pixelDx = e.clientX - drag.startMouse.x;
+      const steps = Math.round(pixelDx / 40);
+      const newRot = ((f.rotation + steps * 90) % 360 + 360) % 360;
       onUpdateFurniture(drag.furnitureId!, { rotation: newRot });
       return;
     }
@@ -772,12 +791,21 @@ function FurnitureShape({
   const sy = (item.length * scale) / 100;
 
   return (
-    <g style={{ opacity, cursor: 'move' }} transform={`translate(${tx} ${ty}) rotate(${item.rotation} ${bw / 2} ${bl / 2})`}>
+    <g style={{ opacity, cursor: 'move', pointerEvents: 'all' } as React.CSSProperties} transform={`translate(${tx} ${ty}) rotate(${item.rotation} ${bw / 2} ${bl / 2})`}>
       {/* invisible hit area covering the bounding box — receives all pointer events.
-          fill with near-invisible opacity so SVG pointer-events:"all" works in all browsers */}
-      <rect data-furniture-id={item.id} x={0} y={0} width={bw} height={bl} fill="white" fillOpacity={0.001} pointerEvents="all" />
+          Use fillOpacity 0.02 (above browser threshold for pointer events) */}
+      <rect
+        data-furniture-id={item.id}
+        x={0}
+        y={0}
+        width={bw}
+        height={bl}
+        fill="white"
+        fillOpacity={0.02}
+        style={{ pointerEvents: 'all' }}
+      />
       {/* the symbol — pointer-events: none so clicks pass through to the hit area */}
-      <g transform={`scale(${sx} ${sy})`} pointerEvents="none">
+      <g transform={`scale(${sx} ${sy})`} style={{ pointerEvents: 'none' }}>
         <svg viewBox="0 0 100 100" width={100} height={100} style={{ overflow: 'visible', pointerEvents: 'none' }}>
           <FurnitureSymbol type={item.type} color={color} className="w-full h-full" />
         </svg>
@@ -785,23 +813,22 @@ function FurnitureShape({
       {/* selection outline + handles */}
       {selected && (
         <>
-          <rect x={-2} y={-2} width={bw + 4} height={bl + 4} fill="none" stroke={accentColor} strokeWidth={1.5} strokeDasharray="4 2" pointerEvents="none" />
+          <rect x={-2} y={-2} width={bw + 4} height={bl + 4} fill="none" stroke={accentColor} strokeWidth={1.5} strokeDasharray="4 2" style={{ pointerEvents: 'none' }} />
           {/* resize handle (bottom-right corner) — drag to resize */}
-          <g data-furniture-id={item.id} data-furniture-handle="resize" style={{ cursor: 'nwse-resize' }}>
-            <rect x={bw - 5} y={bl - 5} width={10} height={10} fill={accentColor} stroke="white" strokeWidth={1.5} rx={2} />
+          <g data-furniture-id={item.id} data-furniture-handle="resize" style={{ cursor: 'nwse-resize', pointerEvents: 'all' } as React.CSSProperties}>
+            <rect x={bw - 6} y={bl - 6} width={12} height={12} fill={accentColor} stroke="white" strokeWidth={1.5} rx={2} />
             <line x1={bw - 2} y1={bl - 2} x2={bw + 2} y2={bl + 2} stroke="white" strokeWidth={1} />
-            <line x1={bw + 2} y1={bl - 2} x2={bw - 2} y2={bl + 2} stroke="white" strokeWidth={1} opacity={0.5} />
           </g>
           {/* rotate handle (top-right) */}
-          <g data-furniture-id={item.id} data-furniture-handle="rotate" style={{ cursor: 'grab' }}>
-            <circle cx={bw + 12} cy={-12} r={7} fill={accentColor} stroke="white" strokeWidth={1.5} />
-            <path d={`M ${bw + 9} -12 A 3 3 0 1 1 ${bw + 15} -12`} fill="none" stroke="white" strokeWidth={1.2} />
+          <g data-furniture-id={item.id} data-furniture-handle="rotate" style={{ cursor: 'grab', pointerEvents: 'all' } as React.CSSProperties}>
+            <circle cx={bw + 14} cy={-14} r={8} fill={accentColor} stroke="white" strokeWidth={1.5} />
+            <path d={`M ${bw + 10} -14 A 4 4 0 1 1 ${bw + 18} -14`} fill="none" stroke="white" strokeWidth={1.2} />
           </g>
           {/* delete handle (top-left) */}
-          <g data-furniture-id={item.id} data-furniture-handle="delete" style={{ cursor: 'pointer' }}>
-            <circle cx={-12} cy={-12} r={7} fill="#dc2626" stroke="white" strokeWidth={1.5} />
-            <line x1={-15} y1={-15} x2={-9} y2={-9} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
-            <line x1={-9} y1={-15} x2={-15} y2={-9} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+          <g data-furniture-id={item.id} data-furniture-handle="delete" style={{ cursor: 'pointer', pointerEvents: 'all' } as React.CSSProperties}>
+            <circle cx={-14} cy={-14} r={8} fill="#dc2626" stroke="white" strokeWidth={1.5} />
+            <line x1={-17} y1={-17} x2={-11} y2={-11} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+            <line x1={-11} y1={-17} x2={-17} y2={-11} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
           </g>
         </>
       )}

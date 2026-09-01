@@ -470,3 +470,29 @@ Stage Summary:
 - Rooms zig-zag flexible: split vertically or horizontally to create L/T-shaped layouts
 - Furniture addable in 3D view via quick-add bar, switch to 2D for full editing
 - Car and bike rebuilt as realistic animated 3D models (metallic paint, glass windshields, spinning wheels)
+
+---
+Task ID: 11 (fix furniture cursor interactions)
+Agent: main
+Task: Fix furniture not adjustable/resizable/rotatable by cursor — root cause was event target attribute walking
+
+Work Log:
+- Root cause: when clicking furniture handles (resize/rotate/delete), the pointer event target was the CHILD element (rect, circle) inside the handle <g>, NOT the <g> itself. The child elements don't have data-furniture-id or data-furniture-handle attributes — only the parent <g> does. So getAttribute() returned null and the furniture branch was never entered.
+- Fix: rewrote onPointerDown to WALK UP the DOM from e.target to find data-* attributes on ancestors. Now checks data-furniture-id, data-furniture-handle, data-door-room-id, data-door-index, data-room-id, data-handle by traversing parentElement chain up to the SVG root.
+- Also fixed: fillOpacity 0.001 → 0.02 (below browser threshold for pointer events on some browsers)
+- Also fixed: added pointerEvents: 'all' to the outer <g> and to each handle <g> via style prop
+- Also fixed: rotation sensitivity — was using dx in plot units (too slow), now uses raw pixel delta (40px = 90° step)
+- Increased handle sizes: resize 10→12px, rotate/delete circles 7→8px radius, for easier clicking
+
+Verification (Agent Browser):
+- Click furniture → all 3 handles appear (resize, rotate, delete) ✓
+- Drag furniture body → position changes (364,660 → 418,696) ✓
+- Drag resize handle → size changes (125×53 → 205×116) ✓
+- Drag rotate handle → rotation changes (0° → 180°) ✓
+- Click delete handle → furniture removed (count 7 → 3) ✓
+- Lint clean, no errors
+
+Stage Summary:
+- All furniture now fully interactive with cursor: select, move, resize, rotate, delete
+- Root cause was DOM attribute walking — fixed by traversing parentElement chain
+- Handles are larger and more responsive
