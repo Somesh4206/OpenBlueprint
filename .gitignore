@@ -52,3 +52,10 @@ prompt
 server.log
 # Skills directory
 /skills/
+# Agent context
+/agent-ctx/
+/examples/
+/tests/
+/download/
+/db/
+mini-services/
