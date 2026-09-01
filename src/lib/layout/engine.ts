@@ -405,8 +405,14 @@ export function generateFloorLayout(
   out.push(...parkingRooms, ...optimized);
 
   // ---- Auto doors & windows ----
+  // Skip staircase (open stairwell, no walls/doors) and parking (already has its door)
   for (let i = 0; i < out.length; i++) {
-    if (out[i].type === 'parking') continue; // parking already has its door
+    if (out[i].type === 'parking') continue;
+    if (out[i].type === 'staircase') {
+      out[i].doors = [];
+      out[i].windows = [];
+      continue;
+    }
     out[i].doors = autoDoors(out[i], config.plot, config.plot.roadSide);
     out[i].windows = autoWindows(out[i], config.plot);
   }

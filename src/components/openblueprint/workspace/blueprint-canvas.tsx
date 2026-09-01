@@ -430,6 +430,7 @@ export function BlueprintCanvas({
             hasError={errorRoomIds.has(room.id)}
             hasWarning={warningRoomIds.has(room.id)}
             dimmed={showAllFloors && room.floor !== currentFloor}
+            allRooms={layout.rooms}
           />
         ))}
 
@@ -496,6 +497,19 @@ export function BlueprintCanvas({
   );
 }
 
+// Check if two rooms are adjacent (share a wall segment)
+function areRoomsAdjacent(a: { x: number; y: number; width: number; length: number; floor: number }, b: { x: number; y: number; width: number; length: number; floor: number }): boolean {
+  if (a.floor !== b.floor) return false;
+  const tol = 0.6;
+  // vertical wall shared (a.right = b.left or b.right = a.left)
+  const vShare = (Math.abs(a.x + a.width - b.x) < tol || Math.abs(b.x + b.width - a.x) < tol) &&
+    a.y < b.y + b.length - tol && a.y + a.length > b.y + tol;
+  // horizontal wall shared (a.bottom = b.top or b.bottom = a.top)
+  const hShare = (Math.abs(a.y + a.length - b.y) < tol || Math.abs(b.y + b.length - a.y) < tol) &&
+    a.x < b.x + b.width - tol && a.x + a.width > b.x + tol;
+  return vShare || hShare;
+}
+
 function RoomShape({
   room,
   plot,
@@ -510,6 +524,7 @@ function RoomShape({
   hasError,
   hasWarning,
   dimmed,
+  allRooms,
 }: {
   room: RoomRect;
   plot: LayoutData['plot'];
@@ -524,6 +539,7 @@ function RoomShape({
   hasError: boolean;
   hasWarning: boolean;
   dimmed: boolean;
+  allRooms: RoomRect[];
 }) {
   const cat = ROOM_CATALOG[room.type];
   const rx = originX + room.x * scale;
@@ -531,6 +547,27 @@ function RoomShape({
   const rw = room.width * scale;
   const rl = room.length * scale;
   const stroke = hasError ? '#dc2626' : selected ? accentColor : cat.accent;
+
+  // For split rooms: find the partner and determine which edge is shared (no wall)
+  const splitPartner = room.splitPartner ? allRooms.find((r) => r.id === room.splitPartner) : null;
+  // Also check if any adjacent room is a staircase — skip the wall facing the staircase
+  // (staircase is an open stairwell, no walls between it and adjacent rooms)
+  const adjacentStaircase = allRooms.filter((r) => r.id !== room.id && r.floor === room.floor && r.type === 'staircase' && areRoomsAdjacent(room, r));
+  // Determine shared edge: if partner is to the right, skip right wall; etc.
+  let skipTop = false, skipRight = false, skipBottom = false, skipLeft = false;
+  if (splitPartner) {
+    if (Math.abs(splitPartner.x - (room.x + room.width)) < 0.6) skipRight = true;
+    if (Math.abs((splitPartner.x + splitPartner.width) - room.x) < 0.6) skipLeft = true;
+    if (Math.abs(splitPartner.y - (room.y + room.length)) < 0.6) skipBottom = true;
+    if (Math.abs((splitPartner.y + splitPartner.length) - room.y) < 0.6) skipTop = true;
+  }
+  // Also skip walls facing a staircase
+  for (const sc of adjacentStaircase) {
+    if (Math.abs(sc.x - (room.x + room.width)) < 0.6) skipRight = true;
+    if (Math.abs((sc.x + sc.width) - room.x) < 0.6) skipLeft = true;
+    if (Math.abs(sc.y - (room.y + room.length)) < 0.6) skipBottom = true;
+    if (Math.abs((sc.y + sc.length) - room.y) < 0.6) skipTop = true;
+  }
   const sw = selected ? 2.5 : 1.5;
   const opacity = dimmed ? 0.4 : 1;
 
@@ -542,9 +579,11 @@ function RoomShape({
     { id: 'resize-se', x: rx + rw, y: ry + rl, cursor: 'nwse-resize' },
   ] : [];
 
+  const isStaircase = room.type === 'staircase';
+
   return (
     <g style={{ opacity }} className={selected ? '' : 'cursor-pointer'}>
-      {/* Room fill */}
+      {/* Room fill — no stroke (walls drawn as separate lines below) */}
       <rect
         data-room-id={room.id}
         x={rx}
@@ -552,33 +591,59 @@ function RoomShape({
         width={rw}
         height={rl}
         fill={cat.color}
-        stroke={stroke}
-        strokeWidth={sw}
+        stroke="none"
         onClick={onSelect}
       />
-      {hasWarning && !hasError && (
+      {/* Wall segments — skip the shared edge for split rooms, skip all for staircase */}
+      {!isStaircase && (
+        <g pointerEvents="none">
+          {!skipTop && <line x1={rx} y1={ry} x2={rx + rw} y2={ry} stroke={stroke} strokeWidth={sw} />}
+          {!skipBottom && <line x1={rx} y1={ry + rl} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+          {!skipLeft && <line x1={rx} y1={ry} x2={rx} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+          {!skipRight && <line x1={rx + rw} y1={ry} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+        </g>
+      )}
+      {hasWarning && !hasError && !isStaircase && (
         <rect data-room-id={room.id} x={rx} y={ry} width={rw} height={rl} fill="none" stroke="#d97706" strokeWidth={2} strokeDasharray="4 3" onClick={onSelect} />
       )}
-      {hasError && (
+      {hasError && !isStaircase && (
         <rect data-room-id={room.id} x={rx} y={ry} width={rw} height={rl} fill="rgba(220,38,38,0.08)" stroke="#dc2626" strokeWidth={2} onClick={onSelect} />
       )}
 
-      {/* Doors */}
-      {room.doors.map((d, i) => (
-        <DoorGraphic key={i} door={d} roomId={room.id} doorIndex={i} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} accent={accentColor} selected={selected} />
-      ))}
-      {/* Windows */}
-      {room.windows.map((w, i) => (
-        <WindowGraphic key={i} window={w} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} />
-      ))}
+      {/* Staircase: render step lines instead of walls/doors */}
+      {isStaircase ? (
+        <g pointerEvents="none">
+          {/* Dashed border to indicate open stairwell */}
+          <rect x={rx} y={ry} width={rw} height={rl} fill="none" stroke={cat.accent} strokeWidth={1} strokeDasharray="6 4" opacity={0.5} />
+          {/* Step lines — horizontal lines across the room */}
+          {Array.from({ length: Math.max(4, Math.floor(rl / (scale * 1.2))) }, (_, i) => {
+            const stepY = ry + (i + 1) * (rl / (Math.max(4, Math.floor(rl / (scale * 1.2))) + 1));
+            return <line key={i} x1={rx + 3} y1={stepY} x2={rx + rw - 3} y2={stepY} stroke={cat.accent} strokeWidth={1} opacity={0.6} />;
+          })}
+          {/* Arrow indicating up direction */}
+          <path d={`M ${rx + rw / 2} ${ry + rl - 10} L ${rx + rw / 2} ${ry + 10} M ${rx + rw / 2 - 5} ${ry + 16} L ${rx + rw / 2} ${ry + 10} L ${rx + rw / 2 + 5} ${ry + 16}`} fill="none" stroke={cat.accent} strokeWidth={1.5} opacity={0.7} />
+          <text x={rx + rw / 2} y={ry + rl - 4} textAnchor="middle" fontSize={8} fill={cat.accent} fontWeight={600} pointerEvents="none">UP</text>
+        </g>
+      ) : (
+        <>
+          {/* Doors */}
+          {room.doors.map((d, i) => (
+            <DoorGraphic key={i} door={d} roomId={room.id} doorIndex={i} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} accent={accentColor} selected={selected} />
+          ))}
+          {/* Windows */}
+          {room.windows.map((w, i) => (
+            <WindowGraphic key={i} window={w} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} />
+          ))}
+        </>
+      )}
 
       {/* Labels */}
       {showLabels && rw > 50 && rl > 32 && (
         <>
-          <text x={rx + rw / 2} y={ry + rl / 2 - 2} textAnchor="middle" fontSize={Math.max(9, Math.min(13, rw / 10))} fontWeight={600} fill="#1f2a3a" pointerEvents="none">
+          <text x={rx + rw / 2} y={ry + rl / 2 + (isStaircase ? 20 : -2)} textAnchor="middle" fontSize={Math.max(9, Math.min(13, rw / 10))} fontWeight={600} fill="#1f2a3a" pointerEvents="none">
             {room.name}
           </text>
-          {showDims && rl > 44 && (
+          {showDims && rl > 44 && !isStaircase && (
             <text x={rx + rw / 2} y={ry + rl / 2 + 13} textAnchor="middle" fontSize={Math.max(8, Math.min(10, rw / 12))} fill="#5b6678" className="tech-num" pointerEvents="none">
               {fmt(room.width)} × {fmt(room.length)}
             </text>

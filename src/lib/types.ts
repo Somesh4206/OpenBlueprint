@@ -29,6 +29,9 @@ export interface RoomRect {
   // doors as wall-segment markers (normalized 0..1 along the wall)
   doors: DoorMarker[];
   windows: WindowMarker[];
+  // For split rooms: the ID of the other half. Split rooms share an open boundary
+  // (no wall between them) so they flow as one space.
+  splitPartner?: string;
 }
 
 // ---- Furniture ----

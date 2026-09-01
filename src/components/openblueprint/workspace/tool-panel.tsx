@@ -28,6 +28,7 @@ import {
   ChevronUp,
   ChevronDown,
   Settings2,
+  Sparkles,
 } from 'lucide-react';
 import { FurnitureItem, FurnitureType, LayoutData, RoomRect, RoomType } from '@/lib/types';
 
@@ -322,58 +323,89 @@ function RoomToolPanel(props: Props) {
           {/* Split room — zig-zag flexibility to manage free spaces */}
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Split Room (Zig-Zag)</Label>
-            <p className="text-[10px] text-muted-foreground mb-2">Split this room into two parts to create L-shaped or T-shaped layouts and manage free spaces.</p>
+            <p className="text-[10px] text-muted-foreground mb-2">Split this room into two parts. The two halves share an open boundary (no wall between them) so they flow as one space.</p>
             <div className="grid grid-cols-2 gap-1.5">
               <Button size="sm" variant="outline" className="h-8 text-xs gap-1" disabled={selectedRoom.width < 10} onClick={() => {
-                // Split vertically (left/right)
+                // Split vertically (left/right halves)
                 const w2 = Math.round(selectedRoom.width / 2 * 2) / 2;
                 const layout2 = useApp.getState().currentLayout;
                 if (!layout2) return;
+                const newId = `r${Date.now()}${Math.floor(Math.random() * 1000)}`;
                 const newRoom: RoomRect = {
-                  id: `r${Date.now()}${Math.floor(Math.random() * 1000)}`,
+                  id: newId,
                   type: selectedRoom.type,
-                  name: `${selectedRoom.name} (Split)`,
+                  name: `${selectedRoom.name} B`,
                   x: selectedRoom.x + w2,
                   y: selectedRoom.y,
                   width: selectedRoom.width - w2,
                   length: selectedRoom.length,
                   floor: selectedRoom.floor,
-                  doors: [{ wall: 'left' as const, pos: 0.5, width: 3, swing: 'in-right' as const }],
+                  doors: [],
                   windows: [],
+                  splitPartner: selectedRoom.id, // no wall between the two halves
                 };
                 useApp.getState().setCurrentLayout({
                   ...layout2,
-                  rooms: layout2.rooms.map((r) => r.id === selectedRoom.id ? { ...r, width: w2 } : r).concat(newRoom),
+                  rooms: layout2.rooms.map((r) => r.id === selectedRoom.id ? { ...r, width: w2, name: `${r.name} A`, splitPartner: newId } : r).concat(newRoom),
                 });
               }}>
                 <ArrowRightLeft className="size-3" /> Split ↕
               </Button>
               <Button size="sm" variant="outline" className="h-8 text-xs gap-1" disabled={selectedRoom.length < 10} onClick={() => {
-                // Split horizontally (top/bottom)
+                // Split horizontally (top/bottom halves)
                 const l2 = Math.round(selectedRoom.length / 2 * 2) / 2;
                 const layout2 = useApp.getState().currentLayout;
                 if (!layout2) return;
+                const newId = `r${Date.now()}${Math.floor(Math.random() * 1000)}`;
                 const newRoom: RoomRect = {
-                  id: `r${Date.now()}${Math.floor(Math.random() * 1000)}`,
+                  id: newId,
                   type: selectedRoom.type,
-                  name: `${selectedRoom.name} (Split)`,
+                  name: `${selectedRoom.name} B`,
                   x: selectedRoom.x,
                   y: selectedRoom.y + l2,
                   width: selectedRoom.width,
                   length: selectedRoom.length - l2,
                   floor: selectedRoom.floor,
-                  doors: [{ wall: 'top' as const, pos: 0.5, width: 3, swing: 'in-right' as const }],
+                  doors: [],
                   windows: [],
+                  splitPartner: selectedRoom.id,
                 };
                 useApp.getState().setCurrentLayout({
                   ...layout2,
-                  rooms: layout2.rooms.map((r) => r.id === selectedRoom.id ? { ...r, length: l2 } : r).concat(newRoom),
+                  rooms: layout2.rooms.map((r) => r.id === selectedRoom.id ? { ...r, length: l2, name: `${r.name} A`, splitPartner: newId } : r).concat(newRoom),
                 });
               }}>
                 <ArrowRightLeft className="size-3" /> Split ↔
               </Button>
             </div>
           </div>
+
+          {/* Auto-arrange: regenerate the layout with the current room configuration */}
+          <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1" onClick={() => {
+            const layout2 = useApp.getState().currentLayout;
+            if (!layout2) return;
+            // Build a config from the current layout's rooms and regenerate
+            const config2 = {
+              plot: layout2.plot,
+              floors: layout2.floors,
+              rooms: layout2.rooms.reduce((acc, r) => {
+                const existing = acc.find((rr) => rr.type === r.type);
+                if (existing) existing.count++;
+                else acc.push({ type: r.type, name: r.name, count: 1, minWidth: r.width, minLength: r.length, preferredWidth: r.width, preferredLength: r.length, priority: 'medium' as const });
+                return acc;
+              }, [] as import('@/lib/types').RoomRequirement[]),
+              style: 'modern' as const,
+              preferences: [],
+              vastuEnabled: false,
+              vastu: { entrance: null, kitchen: null, bedroom: null, pooja: null },
+            };
+            import('@/lib/layout/engine').then(({ generateLayout }) => {
+              const newLayout = generateLayout(config2, layout2.strategy);
+              useApp.getState().setCurrentLayout(newLayout);
+            });
+          }}>
+            <Sparkles className="size-3" /> Auto-Arrange Rooms
+          </Button>
 
           <Button size="sm" variant="destructive" className="w-full h-8 text-xs gap-1" onClick={() => onDeleteRoom(selectedRoom.id)}>
             <Trash2 className="size-3" /> Delete Room

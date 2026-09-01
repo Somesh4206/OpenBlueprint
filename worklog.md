@@ -496,3 +496,40 @@ Stage Summary:
 - All furniture now fully interactive with cursor: select, move, resize, rotate, delete
 - Root cause was DOM attribute walking — fixed by traversing parentElement chain
 - Handles are larger and more responsive
+
+---
+Task ID: 12 (staircase open + split no-wall + auto-arrange)
+Agent: main
+Task: Remove walls/doors from staircase, make split rooms share open boundary, add auto-arrange
+
+Work Log:
+- Staircase rooms now render as OPEN stairwells: no walls (stroke="none"), no doors, no windows
+  • Render step lines (horizontal lines across the room)
+  • UP arrow indicating direction
+  • Dashed border (instead of solid wall) to indicate the stairwell opening
+  • Engine skips door/window generation for staircase rooms
+- Adjacent rooms now SKIP the wall on edges facing a staircase:
+  • Added areRoomsAdjacent() helper to detect shared walls
+  • RoomShape checks all adjacent rooms — if any is a staircase, the shared wall edge is skipped
+  • VLM confirmed: "left side of the staircase is open (no wall separating it from the green Living Room)"
+- Split rooms now share an OPEN boundary (no wall between the two halves):
+  • Added splitPartner field to RoomRect type
+  • Split buttons set splitPartner on both halves
+  • RoomShape detects the split partner and skips the wall on the shared edge
+  • Both halves flow as one continuous space
+- Added "Auto-Arrange Rooms" button to Room Tool panel:
+  • Regenerates the layout with the current room configuration
+  • Uses the zone-based planner to re-arrange all rooms optimally
+  • Triggered when user wants to auto-fix the layout after manual edits
+
+Verification (Agent Browser + VLM):
+- Layout valid, 11 rooms, score 91/100
+- Staircase: step lines + UP arrow visible, no walls, open to adjacent rooms
+- VLM: "staircase is open, no wall separating it from the living room"
+- Split rooms: shared boundary has no wall (verified via wall-line analysis)
+- Lint clean, no errors
+
+Stage Summary:
+- Staircase is an open stairwell (no walls, no doors, step lines + UP arrow)
+- Split rooms share open boundary (no wall between halves)
+- Auto-arrange button regenerates layout with current rooms
