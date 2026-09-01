@@ -280,7 +280,8 @@ export function Workspace({ config, design, projectId }: Props) {
       </header>
 
       <div className="flex-1 flex min-h-0">
-        {/* Left tool panel */}
+        {/* Left tool panel — hidden in 3D view for clean full-screen experience */}
+        {view2d && (
         <aside className="w-14 sm:w-16 border-r border-border bg-card flex flex-col items-center py-3 gap-1 shrink-0 overflow-y-auto scroll-thin">
           {TOOLS.map((t) => (
             <TooltipProvider key={t.id}>
@@ -313,6 +314,7 @@ export function Workspace({ config, design, projectId }: Props) {
             </Tooltip>
           </TooltipProvider>
         </aside>
+        )}
 
         {/* Contextual tool panel — appears when a tool with options is selected (2D only) */}
         {view2d && (tool === 'furniture' || tool === 'door' || tool === 'window' || tool === 'stairs' || tool === 'room') && (
@@ -488,7 +490,8 @@ export function Workspace({ config, design, projectId }: Props) {
           </div>
         </main>
 
-        {/* Right panel */}
+        {/* Right panel — hidden in 3D view for clean full-screen experience */}
+        {view2d && (
         <aside className="w-80 lg:w-96 border-l border-border bg-card flex flex-col shrink-0 overflow-hidden">
           {/* AI Assistant (always at top) */}
           {aiPanelOpen && (
@@ -518,6 +521,7 @@ export function Workspace({ config, design, projectId }: Props) {
             </div>
           </ScrollArea>
         </aside>
+        )}
       </div>
 
       {/* Export modal */}
