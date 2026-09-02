@@ -482,7 +482,7 @@ function RoomsStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c
         {/* Selected rooms detail */}
         <Card className="p-4 h-fit lg:sticky lg:top-24 max-h-[70vh] overflow-hidden flex flex-col">
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><LayoutGrid className="size-4 text-cyan" /> Configured Rooms ({rooms.reduce((s, r) => s + r.count, 0)})</h3>
-          <ScrollArea className="flex-1 -mx-2 px-2">
+          <ScrollArea className="flex-1 -mx-2 px-2 min-h-0" style={{ maxHeight: '55vh' }}>
             {rooms.length === 0 ? (
               <p className="text-sm text-muted-foreground py-6 text-center">No rooms selected yet. Tap a room card to add it.</p>
             ) : (

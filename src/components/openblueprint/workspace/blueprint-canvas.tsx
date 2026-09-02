@@ -551,8 +551,11 @@ function RoomShape({
   // For split rooms: find the partner and determine which edge is shared (no wall)
   const splitPartner = room.splitPartner ? allRooms.find((r) => r.id === room.splitPartner) : null;
   // Also check if any adjacent room is a staircase — skip the wall facing the staircase
-  // (staircase is an open stairwell, no walls between it and adjacent rooms)
   const adjacentStaircase = allRooms.filter((r) => r.id !== room.id && r.floor === room.floor && r.type === 'staircase' && areRoomsAdjacent(room, r));
+  // To avoid DOUBLE WALLS (two adjacent rooms each drawing their own wall on the shared edge),
+  // only draw a shared wall from ONE side. We use the rule: the room with the SMALLER id draws the wall.
+  // The room with the LARGER id skips it. This ensures each shared wall is drawn exactly once.
+  const adjacentRooms = allRooms.filter((r) => r.id !== room.id && r.floor === room.floor && areRoomsAdjacent(room, r));
   // Determine shared edge: if partner is to the right, skip right wall; etc.
   let skipTop = false, skipRight = false, skipBottom = false, skipLeft = false;
   if (splitPartner) {
@@ -561,14 +564,27 @@ function RoomShape({
     if (Math.abs(splitPartner.y - (room.y + room.length)) < 0.6) skipBottom = true;
     if (Math.abs((splitPartner.y + splitPartner.length) - room.y) < 0.6) skipTop = true;
   }
-  // Also skip walls facing a staircase
+  // Skip walls facing a staircase (open stairwell)
   for (const sc of adjacentStaircase) {
     if (Math.abs(sc.x - (room.x + room.width)) < 0.6) skipRight = true;
     if (Math.abs((sc.x + sc.width) - room.x) < 0.6) skipLeft = true;
     if (Math.abs(sc.y - (room.y + room.length)) < 0.6) skipBottom = true;
     if (Math.abs((sc.y + sc.length) - room.y) < 0.6) skipTop = true;
   }
-  const sw = selected ? 2.5 : 1.5;
+  // De-duplicate: for each adjacent room (not staircase, not split partner), only draw the shared
+  // wall from the room with the lexicographically smaller id. The other room skips it.
+  for (const adj of adjacentRooms) {
+    if (adj.type === 'staircase') continue;
+    if (adj.id === room.splitPartner) continue;
+    // Only skip if this room's id is LARGER than the adjacent room's id (the smaller one draws the wall)
+    if (room.id > adj.id) {
+      if (Math.abs(adj.x - (room.x + room.width)) < 0.6) skipRight = true;
+      if (Math.abs((adj.x + adj.width) - room.x) < 0.6) skipLeft = true;
+      if (Math.abs(adj.y - (room.y + room.length)) < 0.6) skipBottom = true;
+      if (Math.abs((adj.y + adj.length) - room.y) < 0.6) skipTop = true;
+    }
+  }
+  const sw = selected ? 2 : 1;
   const opacity = dimmed ? 0.4 : 1;
 
   const handleSize = 8;

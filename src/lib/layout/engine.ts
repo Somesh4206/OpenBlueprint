@@ -324,24 +324,25 @@ function placeParkingStrip(
   buildable: Rect,
   roadSide: PlotConfig['roadSide'],
 ): { parking: Rect | null; rest: Rect } {
-  const parkingDepth = 20;
+  const parkingDepth = 18; // standard car parking depth
+  const parkingWidth = Math.min(12, buildable.w * 0.4); // single car width, not full plot width
   let parking: Rect | null = null;
   let rest = { ...buildable };
   if (buildable.h > parkingDepth + 10 && (roadSide === 'south' || roadSide === 'north')) {
     if (roadSide === 'south') {
-      parking = { x: buildable.x, y: buildable.y + buildable.h - parkingDepth, w: buildable.w, h: parkingDepth };
+      parking = { x: buildable.x, y: buildable.y + buildable.h - parkingDepth, w: parkingWidth, h: parkingDepth };
       rest = { x: buildable.x, y: buildable.y, w: buildable.w, h: buildable.h - parkingDepth };
     } else {
-      parking = { x: buildable.x, y: buildable.y, w: buildable.w, h: parkingDepth };
+      parking = { x: buildable.x, y: buildable.y, w: parkingWidth, h: parkingDepth };
       rest = { x: buildable.x, y: buildable.y + parkingDepth, w: buildable.w, h: buildable.h - parkingDepth };
     }
   } else if (buildable.w > 18 && (roadSide === 'east' || roadSide === 'west')) {
     if (roadSide === 'east') {
-      parking = { x: buildable.x + buildable.w - 18, y: buildable.y, w: 18, h: buildable.h };
-      rest = { x: buildable.x, y: buildable.y, w: buildable.w - 18, h: buildable.h };
+      parking = { x: buildable.x + buildable.w - parkingWidth, y: buildable.y, w: parkingWidth, h: parkingDepth };
+      rest = { x: buildable.x, y: buildable.y, w: buildable.w, h: buildable.h };
     } else {
-      parking = { x: buildable.x, y: buildable.y, w: 18, h: buildable.h };
-      rest = { x: buildable.x + 18, y: buildable.y, w: buildable.w - 18, h: buildable.h };
+      parking = { x: buildable.x, y: buildable.y, w: parkingWidth, h: parkingDepth };
+      rest = { x: buildable.x, y: buildable.y, w: buildable.w, h: buildable.h };
     }
   }
   return { parking, rest };

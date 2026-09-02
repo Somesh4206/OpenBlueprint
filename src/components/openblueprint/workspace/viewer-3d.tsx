@@ -992,21 +992,21 @@ function CameraRig({
     let look: [number, number, number];
     switch (cameraView) {
       case 'isometric':
-        pos = [plotW * 0.6, plotW * 0.75, plotW * 0.6];
-        look = [0, 5, 0];
+        pos = [plotW * 0.45, plotW * 0.55, plotW * 0.45];
+        look = [0, 4, 0];
         break;
       case 'front':
-        pos = [0, 7, plotL * 1.15];
-        look = [0, 5, 0];
+        pos = [0, 6, plotL * 0.85];
+        look = [0, 4, 0];
         break;
       case 'top':
-        pos = [0.01, plotL * 1.6, 0.01];
+        pos = [0.01, plotL * 1.2, 0.01];
         look = [0, 0, 0];
         break;
       case 'orbit':
       default:
-        pos = [plotW * 0.75, plotW * 0.65, plotW * 0.85];
-        look = [0, 5, 0];
+        pos = [plotW * 0.55, plotW * 0.5, plotW * 0.65];
+        look = [0, 4, 0];
         break;
     }
     cameraTargetRef.current.set(pos[0], pos[1], pos[2]);
