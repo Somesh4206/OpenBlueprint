@@ -12,7 +12,6 @@ import {
 import { ROOM_CATALOG } from '../room-catalog';
 import { scoreLayout } from './scoring';
 import { validateLayout } from './validation';
-import { allocateZones, placeZoneRooms, optimizeAdjacencies } from '../architecture/planner';
 
 export { scoreLayout, validateLayout };
 
@@ -225,17 +224,32 @@ function autoDoors(room: RoomRect, plot: PlotConfig, roadSide: PlotConfig['roadS
     room.x + room.width >= plot.width - 0.1 ||
     room.y + room.length >= plot.length - 0.1;
 
+  // Entry door for public rooms on the road-side boundary
   if (isPublic && onBoundary) {
     const wall = roadWall(room, plot, roadSide);
     if (wall) doors.push({ wall, pos: 0.5, width: 3.5, swing: 'in-right' });
-  } else {
-    const wall = centerWall(room, plot);
-    if (wall) doors.push({ wall, pos: 0.5, width: 3, swing: 'in-right' });
   }
+
+  // Interior door — place on the wall facing the CENTER of the plot (toward circulation)
+  // This avoids doors opening into staircases or exterior walls
+  const wall = centerWall(room, plot);
+  if (wall && !doors.some((d) => d.wall === wall)) {
+    // Offset door position slightly to avoid being directly in the center
+    const pos = 0.35 + Math.random() * 0.3; // 0.35-0.65
+    doors.push({ wall, pos: Math.round(pos * 100) / 100, width: 3, swing: 'in-right' });
+  }
+
+  // For private rooms, ensure a door even if center wall is taken
   if (ROOM_CATALOG[room.type].group === 'private' || ROOM_CATALOG[room.type].group === 'service') {
-    const wall = centerWall(room, plot);
-    if (wall && !doors.some((d) => d.wall === wall)) {
-      doors.push({ wall, pos: 0.5, width: 2.8, swing: 'in-right' });
+    if (doors.length === 0) {
+      // Fallback: try any wall that's not the road-side boundary
+      const walls: DoorMarker['wall'][] = ['top', 'bottom', 'left', 'right'];
+      for (const w of walls) {
+        if (!doors.some((d) => d.wall === w)) {
+          doors.push({ wall: w, pos: 0.5, width: 2.8, swing: 'in-right' });
+          break;
+        }
+      }
     }
   }
   return doors;
@@ -362,13 +376,13 @@ export function generateFloorLayout(
 
   const out: RoomRect[] = [];
 
+  // Step 1: Place parking as a strip at the road side (ground floor only)
   const wantsParking = reqs.some((r) => r.type === 'parking');
   let partitionRect = buildable;
-  let parkingReq: RoomRequirement | null = null;
   if (floor === 0 && wantsParking) {
     const { parking, rest } = placeParkingStrip(buildable, config.plot.roadSide);
     if (parking) {
-      parkingReq = reqs.find((r) => r.type === 'parking')!;
+      const parkingReq = reqs.find((r) => r.type === 'parking')!;
       const pr: RoomRect = {
         id: genId(),
         type: 'parking',
@@ -387,26 +401,34 @@ export function generateFloorLayout(
     }
   }
 
-  // ---- ZONE-BASED PLACEMENT (enforces zone clustering + adjacency) ----
-  // Allocate zone regions within the buildable area, then BSP-pack rooms
-  // within each zone sorted by privacy gradient.
-  const zones = allocateZones(partitionRect, reqs, config.plot);
-  for (const zone of zones) {
-    const zoneRooms = placeZoneRooms(zone, floor, config.plot, strategy);
-    out.push(...zoneRooms);
+  // Step 2: Sort ALL remaining rooms by privacy gradient for natural front→rear flow.
+  // Public rooms (living, kitchen, dining) get placed first (front/near road).
+  // Private rooms (bedrooms, bathrooms) get placed last (rear/quiet side).
+  const sorted = shuffleByStrategy(reqs, strategy);
+
+  // Step 3: SINGLE BSP pack — fills the ENTIRE remaining rect with zero gaps.
+  // Every room gets a leaf that exactly fills its allocated space. No gaps, no waste.
+  const placed = bspPack(partitionRect, sorted, strategy);
+
+  for (const p of placed) {
+    const roomRect: RoomRect = {
+      id: genId(),
+      type: p.req.type,
+      name: p.req.name || ROOM_CATALOG[p.req.type].defaultName,
+      x: round(p.rect.x),
+      y: round(p.rect.y),
+      width: round(p.rect.w),
+      length: round(p.rect.h),
+      floor,
+      doors: [],
+      windows: [],
+    };
+    out.push(roomRect);
   }
 
-  // ---- Adjacency optimization: swap rooms to satisfy desired adjacencies ----
-  // Only swap rooms of the same zone to preserve zone clustering.
-  const nonParking = out.filter((r) => r.type !== 'parking');
-  const optimized = optimizeAdjacencies(nonParking);
-  // replace non-parking rooms with optimized versions
-  const parkingRooms = out.filter((r) => r.type === 'parking');
-  out.length = 0;
-  out.push(...parkingRooms, ...optimized);
-
-  // ---- Auto doors & windows ----
-  // Skip staircase (open stairwell, no walls/doors) and parking (already has its door)
+  // Step 4: Auto doors & windows
+  // Staircase = open stairwell (no doors, no walls)
+  // Parking = already has its entry door
   for (let i = 0; i < out.length; i++) {
     if (out[i].type === 'parking') continue;
     if (out[i].type === 'staircase') {
@@ -561,45 +583,53 @@ function distributeRoomsByFloor(reqs: RoomRequirement[], floors: number, floorAs
     return byFloor;
   }
 
-  // Default automatic distribution
+  // Default automatic distribution — follows real Indian residential architecture:
+  // Ground floor: parking, living, kitchen, DINING (always with kitchen), staircase, 1 bathroom (powder room)
+  // Upper floors: bedrooms, remaining bathrooms, pooja, balcony, office, utility, store
   const expanded = expandRequirements(reqs);
   const byFloor: RoomRequirement[][] = Array.from({ length: floors }, () => []);
-  const hasParking = expanded.some((r) => r.type === 'parking');
-  // ground floor core types (dining goes upstairs when parking present to save space)
-  const groundTypes = hasParking && floors > 1
-    ? new Set(['parking', 'living', 'kitchen', 'foyer', 'store', 'staircase'])
-    : new Set(['parking', 'living', 'dining', 'kitchen', 'foyer', 'store', 'staircase']);
 
-  const bathrooms = expanded.filter((r) => r.type === 'bathroom');
-  const upstairs = expanded.filter(
-    (r) => !groundTypes.has(r.type) && r.type !== 'bathroom',
-  );
+  // Rooms that ALWAYS go on ground floor (public zone + staircase)
+  const groundTypes = new Set(['parking', 'living', 'dining', 'kitchen', 'foyer', 'staircase']);
 
-  // ground floor gets public + parking (+ 1 bathroom only if single floor or no parking)
+  // Place ground floor rooms
   for (const r of expanded) {
     if (groundTypes.has(r.type)) byFloor[0].push(r);
   }
-  let bathroomIdx = 0;
-  if (bathrooms.length > 0 && floors === 1) {
-    byFloor[0].push(...bathrooms);
-    bathroomIdx = bathrooms.length;
-  } else if (bathrooms.length > 0 && !hasParking) {
-    // multi-floor without parking: one bathroom on ground
-    byFloor[0].push(bathrooms[0]);
-    bathroomIdx = 1;
-  }
-  // when parking + multi-floor, all bathrooms go upstairs (attached to bedrooms)
 
-  // distribute upstairs rooms across upper floors
-  const remainingBaths = bathrooms.slice(bathroomIdx);
-  const upstairsAll = [...upstairs, ...remainingBaths];
-  if (floors > 1) {
-    const perFloor = Math.ceil(upstairsAll.length / (floors - 1));
-    for (let f = 1; f < floors; f++) {
-      byFloor[f] = upstairsAll.slice((f - 1) * perFloor, f * perFloor);
-    }
+  // Place 1 bathroom on ground floor (powder room for guests) if multi-floor
+  const bathrooms = expanded.filter((r) => r.type === 'bathroom');
+  if (floors > 1 && bathrooms.length > 0) {
+    byFloor[0].push(bathrooms[0]);
+  }
+
+  // Remaining rooms go upstairs
+  const groundRoomIds = new Set(byFloor[0]);
+  const upstairsRooms = expanded.filter((r) => !groundRoomIds.has(r));
+
+  if (floors === 1) {
+    byFloor[0].push(...upstairsRooms);
   } else {
-    byFloor[0].push(...upstairsAll);
+    // Distribute upstairs rooms evenly across upper floors
+    const perFloor = Math.ceil(upstairsRooms.length / (floors - 1));
+    for (let f = 1; f < floors; f++) {
+      byFloor[f] = upstairsRooms.slice((f - 1) * perFloor, f * perFloor);
+      // Ensure staircase is on every upper floor (for vertical circulation)
+      const hasStair = byFloor[f].some((r) => r.type === 'staircase');
+      if (!hasStair) {
+        byFloor[f].push({
+          type: 'staircase',
+          name: 'Staircase',
+          count: 1,
+          minWidth: 6,
+          minLength: 10,
+          preferredWidth: 7,
+          preferredLength: 12,
+          priority: 'high',
+          preferredLocation: 'center',
+        });
+      }
+    }
   }
 
   return byFloor;
