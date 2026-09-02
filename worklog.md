@@ -533,3 +533,41 @@ Stage Summary:
 - Staircase is an open stairwell (no walls, no doors, step lines + UP arrow)
 - Split rooms share open boundary (no wall between halves)
 - Auto-arrange button regenerates layout with current rooms
+
+---
+Task ID: 14 (layout engine rewrite — zero gap, proper floor distribution)
+Agent: main
+Task: Rewrite layout engine to eliminate gaps, fix floor distribution, fix doors
+
+Work Log:
+- Root cause of gaps: zone-based planner split buildable area into separate zone rectangles, then BSP-packed each zone independently. Gaps appeared between zones because zones didn't fill their allocated rects completely.
+- Fix: replaced zone-based planner with SINGLE BSP that packs ALL rooms (except parking) into the ENTIRE remaining buildable area. Every room gets a leaf that exactly fills its allocated space — zero gaps, zero waste.
+- Parking still placed as a strip at the road-side corner (12×18ft, not full plot width).
+- Fixed floor distribution:
+  • Ground floor: parking, living, kitchen, DINING (always with kitchen!), staircase, 1 bathroom (powder room)
+  • Upper floors: bedrooms, remaining bathrooms, staircase (on every floor)
+  • Previously dining was on first floor while kitchen was on ground — fundamental architectural error fixed
+- Fixed door placement:
+  • Interior doors now face the CENTER of the plot (toward circulation area)
+  • Door position offset (0.35-0.65 instead of always 0.5) to avoid doors in exact center
+  • Fallback door on any available wall for private rooms
+  • Staircase rooms have NO doors (open stairwell)
+- Walls: thin single lines (1px stroke), de-duplicated shared walls (only one room draws each shared edge)
+- Removed unused zone planner imports
+
+Verification:
+- 30×40 2-floor 3BHK: Score 87/100, 11 rooms, 0 overlaps
+- Ground floor: Parking(12×18), Kitchen, Living Room, Staircase, Dining, Bathroom 1
+- First floor: Master Bedroom, Bedroom 1, Bedroom 2, Staircase, Bathroom 2
+- Dining is on SAME floor as kitchen ✓
+- Parking is reasonable size (12×18, not full width) ✓
+- No large gaps in the floor plan ✓
+- 3D building well-sized and visible (7/10) ✓
+- Lint clean, pushed to GitHub
+
+Stage Summary:
+- Single BSP fills entire buildable area — zero gaps
+- Dining stays with kitchen on ground floor
+- Parking is realistic 12×18ft
+- Doors face circulation, not staircases
+- Staircase on every floor
