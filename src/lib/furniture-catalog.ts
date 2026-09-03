@@ -66,6 +66,9 @@ export const FURNITURE_CATALOG: FurnitureCatalogEntry[] = [
   // ---- Vehicles (auto-added to parking) ----
   { type: 'car', name: 'Car', category: 'commercial', width: 6, length: 10, color: '#3b4a5a', roomTypes: ['parking'], price: 600000 },
   { type: 'bike', name: 'Bike', category: 'commercial', width: 2.5, length: 6, color: '#1a1a1a', roomTypes: ['parking'], price: 85000 },
+
+  // ---- Staircase (furniture, not a room) ----
+  { type: 'staircase', name: 'Staircase', category: 'circulation', width: 7, length: 12, color: '#e2e8f0', roomTypes: ['living', 'dining', 'foyer'], price: 0 },
 ];
 
 export const FURNITURE_MAP: Record<FurnitureType, FurnitureCatalogEntry> = FURNITURE_CATALOG.reduce(

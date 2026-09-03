@@ -342,24 +342,9 @@ const STRATEGIES: { strategy: LayoutStrategy; name: string; tagline: string }[] 
 ];
 
 function ensureStaircase(reqs: RoomRequirement[], floors: number): RoomRequirement[] {
-  const hasStair = reqs.some((r) => r.type === 'staircase');
-  if (floors > 1 && !hasStair) {
-    return [
-      ...reqs,
-      {
-        type: 'staircase',
-        name: 'Staircase',
-        count: 1,
-        minWidth: 6,
-        minLength: 10,
-        preferredWidth: 7,
-        preferredLength: 12,
-        priority: 'high',
-        preferredLocation: 'center',
-      },
-    ];
-  }
-  return reqs;
+  // Staircase is now FURNITURE, not a room. Don't add it as a room requirement.
+  // It will be placed as furniture inside a room (living/dining/foyer) by autoPlaceFurniture.
+  return reqs.filter((r) => r.type !== 'staircase');
 }
 
 function placeParkingStrip(
@@ -763,6 +748,26 @@ function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem
         break;
     }
   }
+
+  // Place staircase as FURNITURE inside a room (living/dining/foyer) for multi-floor buildings.
+  // Staircase is NOT a room — it's placed in a corner of an existing room.
+  const floors = new Set(rooms.map((r) => r.floor));
+  if (floors.size > 1) {
+    for (const f of floors) {
+      // Find a suitable room on this floor to place the staircase (prefer living, then dining, then foyer)
+      const candidate = rooms.find((r) => r.floor === f && r.type === 'living') ||
+                        rooms.find((r) => r.floor === f && r.type === 'dining') ||
+                        rooms.find((r) => r.floor === f && r.type === 'foyer') ||
+                        rooms.find((r) => r.floor === f && r.type !== 'parking');
+      if (candidate && candidate.width >= 7 && candidate.length >= 8) {
+        // Place staircase in a corner of the room (bottom-right corner)
+        const stairW = Math.min(7, candidate.width - 2);
+        const stairL = Math.min(8, candidate.length - 2);
+        items.push(mkFurniture('staircase', candidate.x + candidate.width - stairW - 0.5, candidate.y + candidate.length - stairL - 0.5, stairW, stairL, f, 0));
+      }
+    }
+  }
+
   return items;
 }
 

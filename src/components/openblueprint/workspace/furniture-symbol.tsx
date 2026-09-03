@@ -370,6 +370,19 @@ export function FurnitureSymbol({
           <circle cx="50" cy="84" r="3" fill="#ffe08a" stroke={darken(color, 0.4)} strokeWidth="0.5" />
         </svg>
       );
+    case 'staircase':
+      return (
+        <svg viewBox="0 0 100 100" className={className} preserveAspectRatio="none">
+          {/* Staircase — steps + UP arrow, no walls */}
+          {Array.from({ length: 8 }, (_, i) => {
+            const stepY = 10 + i * 9;
+            return <line key={i} x1={5} y1={stepY} x2={95} y2={stepY} stroke={stroke} strokeWidth={1.5} opacity={0.7} />;
+          })}
+          {/* UP arrow */}
+          <path d="M 50 88 L 50 12 M 42 22 L 50 12 L 58 22" fill="none" stroke={accent} strokeWidth={2} strokeLinecap="round" />
+          <text x="50" y="96" textAnchor="middle" fontSize={7} fill={accent} fontWeight={700}>UP</text>
+        </svg>
+      );
     default:
       return (
         <svg viewBox="0 0 100 100" className={className} preserveAspectRatio="none">

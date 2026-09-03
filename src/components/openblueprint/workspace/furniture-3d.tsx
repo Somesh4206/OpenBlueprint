@@ -1022,9 +1022,34 @@ function buildFurnitureModel(
       return <CarModel w={w} l={l} color={color} />;
     case 'bike':
       return <BikeModel w={w} l={l} color={color} />;
+    case 'staircase':
+      return <StaircaseModel w={w} l={l} color={color} />;
     default:
       return <DefaultBoxModel w={w} l={l} color={color} />;
   }
+}
+
+// ---- Staircase (furniture, not a room) ----
+function StaircaseModel({ w, l, color }: ModelProps) {
+  const stepCount = Math.max(6, Math.floor(l / 1.2));
+  const stepHeight = 0.75;
+  const stepDepth = l / stepCount;
+  return (
+    <group>
+      {Array.from({ length: stepCount }, (_, i) => (
+        <Box
+          key={i}
+          size={[w * 0.9, stepHeight, stepDepth]}
+          position={[0, stepHeight / 2 + i * stepHeight * 0.3, l / 2 - i * stepDepth - stepDepth / 2]}
+          color={color}
+          roughness={0.8}
+        />
+      ))}
+      {/* Side railings */}
+      <Box size={[0.3, stepHeight * stepCount * 0.4, l]} position={[w * 0.45, stepHeight * stepCount * 0.2, 0]} color={darkenHex(color, 0.3)} roughness={0.7} />
+      <Box size={[0.3, stepHeight * stepCount * 0.4, l]} position={[-w * 0.45, stepHeight * stepCount * 0.2, 0]} color={darkenHex(color, 0.3)} roughness={0.7} />
+    </group>
+  );
 }
 
 // ---- Car (top-down, length along Z, +Z = front) ----

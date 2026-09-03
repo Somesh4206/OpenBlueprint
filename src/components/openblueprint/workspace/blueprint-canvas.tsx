@@ -595,8 +595,6 @@ function RoomShape({
     { id: 'resize-se', x: rx + rw, y: ry + rl, cursor: 'nwse-resize' },
   ] : [];
 
-  const isStaircase = room.type === 'staircase';
-
   return (
     <g style={{ opacity }} className={selected ? '' : 'cursor-pointer'}>
       {/* Room fill — no stroke (walls drawn as separate lines below) */}
@@ -610,56 +608,36 @@ function RoomShape({
         stroke="none"
         onClick={onSelect}
       />
-      {/* Wall segments — skip the shared edge for split rooms, skip all for staircase */}
-      {!isStaircase && (
-        <g pointerEvents="none">
-          {!skipTop && <line x1={rx} y1={ry} x2={rx + rw} y2={ry} stroke={stroke} strokeWidth={sw} />}
-          {!skipBottom && <line x1={rx} y1={ry + rl} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
-          {!skipLeft && <line x1={rx} y1={ry} x2={rx} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
-          {!skipRight && <line x1={rx + rw} y1={ry} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
-        </g>
-      )}
-      {hasWarning && !hasError && !isStaircase && (
+      {/* Wall segments — skip the shared edge for split rooms and staircases */}
+      <g pointerEvents="none">
+        {!skipTop && <line x1={rx} y1={ry} x2={rx + rw} y2={ry} stroke={stroke} strokeWidth={sw} />}
+        {!skipBottom && <line x1={rx} y1={ry + rl} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+        {!skipLeft && <line x1={rx} y1={ry} x2={rx} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+        {!skipRight && <line x1={rx + rw} y1={ry} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+      </g>
+      {hasWarning && !hasError && (
         <rect data-room-id={room.id} x={rx} y={ry} width={rw} height={rl} fill="none" stroke="#d97706" strokeWidth={2} strokeDasharray="4 3" onClick={onSelect} />
       )}
-      {hasError && !isStaircase && (
+      {hasError && (
         <rect data-room-id={room.id} x={rx} y={ry} width={rw} height={rl} fill="rgba(220,38,38,0.08)" stroke="#dc2626" strokeWidth={2} onClick={onSelect} />
       )}
 
-      {/* Staircase: render step lines instead of walls/doors */}
-      {isStaircase ? (
-        <g pointerEvents="none">
-          {/* Dashed border to indicate open stairwell */}
-          <rect x={rx} y={ry} width={rw} height={rl} fill="none" stroke={cat.accent} strokeWidth={1} strokeDasharray="6 4" opacity={0.5} />
-          {/* Step lines — horizontal lines across the room */}
-          {Array.from({ length: Math.max(4, Math.floor(rl / (scale * 1.2))) }, (_, i) => {
-            const stepY = ry + (i + 1) * (rl / (Math.max(4, Math.floor(rl / (scale * 1.2))) + 1));
-            return <line key={i} x1={rx + 3} y1={stepY} x2={rx + rw - 3} y2={stepY} stroke={cat.accent} strokeWidth={1} opacity={0.6} />;
-          })}
-          {/* Arrow indicating up direction */}
-          <path d={`M ${rx + rw / 2} ${ry + rl - 10} L ${rx + rw / 2} ${ry + 10} M ${rx + rw / 2 - 5} ${ry + 16} L ${rx + rw / 2} ${ry + 10} L ${rx + rw / 2 + 5} ${ry + 16}`} fill="none" stroke={cat.accent} strokeWidth={1.5} opacity={0.7} />
-          <text x={rx + rw / 2} y={ry + rl - 4} textAnchor="middle" fontSize={8} fill={cat.accent} fontWeight={600} pointerEvents="none">UP</text>
-        </g>
-      ) : (
-        <>
-          {/* Doors */}
-          {room.doors.map((d, i) => (
-            <DoorGraphic key={i} door={d} roomId={room.id} doorIndex={i} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} accent={accentColor} selected={selected} />
-          ))}
-          {/* Windows */}
-          {room.windows.map((w, i) => (
-            <WindowGraphic key={i} window={w} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} />
-          ))}
-        </>
-      )}
+      {/* Doors */}
+      {room.doors.map((d, i) => (
+        <DoorGraphic key={i} door={d} roomId={room.id} doorIndex={i} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} accent={accentColor} selected={selected} />
+      ))}
+      {/* Windows */}
+      {room.windows.map((w, i) => (
+        <WindowGraphic key={i} window={w} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} />
+      ))}
 
       {/* Labels */}
       {showLabels && rw > 50 && rl > 32 && (
         <>
-          <text x={rx + rw / 2} y={ry + rl / 2 + (isStaircase ? 20 : -2)} textAnchor="middle" fontSize={Math.max(9, Math.min(13, rw / 10))} fontWeight={600} fill="#1f2a3a" pointerEvents="none">
+          <text x={rx + rw / 2} y={ry + rl / 2 - 2} textAnchor="middle" fontSize={Math.max(9, Math.min(13, rw / 10))} fontWeight={600} fill="#1f2a3a" pointerEvents="none">
             {room.name}
           </text>
-          {showDims && rl > 44 && !isStaircase && (
+          {showDims && rl > 44 && (
             <text x={rx + rw / 2} y={ry + rl / 2 + 13} textAnchor="middle" fontSize={Math.max(8, Math.min(10, rw / 12))} fill="#5b6678" className="tech-num" pointerEvents="none">
               {fmt(room.width)} × {fmt(room.length)}
             </text>

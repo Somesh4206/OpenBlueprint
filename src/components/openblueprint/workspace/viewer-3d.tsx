@@ -403,7 +403,6 @@ function computeScene(
     floorRooms.forEach((room) => {
       const cx = to3DX(room.x + room.width / 2, plotW);
       const cz = to3DZ(room.y + room.length / 2, plotL);
-      const isStaircase = room.type === 'staircase';
       const isOpenAir = room.type === 'parking' || room.type === 'balcony';
       const catalog = ROOM_CATALOG[room.type];
 
@@ -450,10 +449,7 @@ function computeScene(
         );
       }
 
-      // Staircase steps.
-      if (isStaircase) {
-        addStairs(room, baseY, plotW, plotL, stairs);
-      }
+      // Staircase is now furniture, not a room — no special rendering here.
 
       // Floating label.
       labels.push({
