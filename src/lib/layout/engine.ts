@@ -57,13 +57,41 @@ export function round(n: number): number {
 }
 
 // ---- Requirement expansion ----
+// Expands a count-based requirement into individual room instances.
+// For bedrooms: the FIRST instance is automatically named "Master Bedroom"
+// (larger, with attached bathroom preference), subsequent ones are "Bedroom 1", "Bedroom 2", etc.
 export function expandRequirements(reqs: RoomRequirement[]): RoomRequirement[] {
   const out: RoomRequirement[] = [];
   for (const r of reqs) {
     for (let i = 0; i < (r.count || 1); i++) {
+      let name = r.name;
+      let preferredWidth = r.preferredWidth;
+      let preferredLength = r.preferredLength;
+      let minWidth = r.minWidth;
+      let minLength = r.minLength;
+
+      if (r.type === 'bedroom') {
+        if (i === 0) {
+          // First bedroom = Master Bedroom (slightly larger)
+          name = 'Master Bedroom';
+          preferredWidth = Math.max(preferredWidth, 12);
+          preferredLength = Math.max(preferredLength, 14);
+          minWidth = Math.max(minWidth, 11);
+          minLength = Math.max(minLength, 13);
+        } else {
+          name = `Bedroom ${i}`;
+        }
+      } else if (r.count > 1) {
+        name = `${r.name} ${i + 1}`;
+      }
+
       out.push({
         ...r,
-        name: r.count > 1 ? `${r.name} ${i + 1}` : r.name,
+        name,
+        preferredWidth,
+        preferredLength,
+        minWidth,
+        minLength,
       });
     }
   }
