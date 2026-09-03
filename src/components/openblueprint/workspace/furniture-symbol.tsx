@@ -383,6 +383,28 @@ export function FurnitureSymbol({
           <text x="50" y="96" textAnchor="middle" fontSize={7} fill={accent} fontWeight={700}>UP</text>
         </svg>
       );
+    case 'spiral-staircase':
+      return (
+        <svg viewBox="0 0 100 100" className={className} preserveAspectRatio="none">
+          {/* Spiral staircase — concentric arcs + central column */}
+          <circle cx="50" cy="50" r="45" fill="none" stroke={stroke} strokeWidth={1.5} opacity={0.4} />
+          <circle cx="50" cy="50" r="35" fill="none" stroke={stroke} strokeWidth={1.5} opacity={0.5} />
+          <circle cx="50" cy="50" r="25" fill="none" stroke={stroke} strokeWidth={1.5} opacity={0.6} />
+          <circle cx="50" cy="50" r="15" fill="none" stroke={stroke} strokeWidth={1.5} opacity={0.7} />
+          {/* Radial step lines */}
+          {Array.from({ length: 12 }, (_, i) => {
+            const angle = (i * 30 * Math.PI) / 180;
+            const x2 = 50 + 45 * Math.cos(angle);
+            const y2 = 50 + 45 * Math.sin(angle);
+            return <line key={i} x1="50" y1="50" x2={x2} y2={y2} stroke={stroke} strokeWidth={1} opacity={0.5} />;
+          })}
+          {/* Central column */}
+          <circle cx="50" cy="50" r="4" fill={accent} stroke={stroke} strokeWidth="1" />
+          {/* UP arrow */}
+          <path d="M 50 88 L 50 12 M 42 22 L 50 12 L 58 22" fill="none" stroke={accent} strokeWidth={2} strokeLinecap="round" />
+          <text x="50" y="96" textAnchor="middle" fontSize={7} fill={accent} fontWeight={700}>UP</text>
+        </svg>
+      );
     default:
       return (
         <svg viewBox="0 0 100 100" className={className} preserveAspectRatio="none">

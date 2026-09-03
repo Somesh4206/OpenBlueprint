@@ -50,7 +50,7 @@ export type FurnitureType =
   | 'dining-set-4' | 'dining-set-6'
   | 'reception-desk' | 'meeting-table' | 'office-cabin'
   | 'clothing-rack' | 'display-shelf' | 'service-counter'
-  | 'car' | 'bike' | 'staircase';
+  | 'car' | 'bike' | 'staircase' | 'spiral-staircase';
 
 export interface FurnitureItem {
   id: string;

@@ -1024,30 +1024,212 @@ function buildFurnitureModel(
       return <BikeModel w={w} l={l} color={color} />;
     case 'staircase':
       return <StaircaseModel w={w} l={l} color={color} />;
+    case 'spiral-staircase':
+      return <SpiralStaircaseModel w={w} l={l} color={color} />;
     default:
       return <DefaultBoxModel w={w} l={l} color={color} />;
   }
 }
 
 // ---- Staircase (furniture, not a room) ----
+// Two types: 'straight' (linear with risers+treads+balusters) and 'spiral' (circular around central column)
+// Both reach the full floor height (9ft) with a railing.
 function StaircaseModel({ w, l, color }: ModelProps) {
-  const stepCount = Math.max(6, Math.floor(l / 1.2));
-  const stepHeight = 0.75;
-  const stepDepth = l / stepCount;
+  const floorHeight = 9; // ft — staircase reaches the top of the floor
+  const riserHeight = 0.6; // ft per step
+  const stepCount = Math.floor(floorHeight / riserHeight);
+  const treadDepth = l / stepCount;
+  const stairColor = color || '#e2e8f0';
+  const railColor = darkenHex(stairColor, 0.25);
+  const balusterColor = darkenHex(stairColor, 0.15);
+  const stepColor = darkenHex(stairColor, 0.05);
+
   return (
     <group>
-      {Array.from({ length: stepCount }, (_, i) => (
-        <Box
-          key={i}
-          size={[w * 0.9, stepHeight, stepDepth]}
-          position={[0, stepHeight / 2 + i * stepHeight * 0.3, l / 2 - i * stepDepth - stepDepth / 2]}
-          color={color}
-          roughness={0.8}
-        />
-      ))}
-      {/* Side railings */}
-      <Box size={[0.3, stepHeight * stepCount * 0.4, l]} position={[w * 0.45, stepHeight * stepCount * 0.2, 0]} color={darkenHex(color, 0.3)} roughness={0.7} />
-      <Box size={[0.3, stepHeight * stepCount * 0.4, l]} position={[-w * 0.45, stepHeight * stepCount * 0.2, 0]} color={darkenHex(color, 0.3)} roughness={0.7} />
+      {/* Steps with proper risers and treads */}
+      {Array.from({ length: stepCount }, (_, i) => {
+        const stepY = i * riserHeight;
+        const stepZ = l / 2 - i * treadDepth - treadDepth / 2;
+        return (
+          <group key={i}>
+            {/* Tread (horizontal top surface) */}
+            <Box
+              size={[w * 0.85, 0.15, treadDepth]}
+              position={[0, stepY + riserHeight - 0.075, stepZ]}
+              color={stepColor}
+              roughness={0.5}
+            />
+            {/* Riser (vertical face) */}
+            <Box
+              size={[w * 0.85, riserHeight, 0.08]}
+              position={[0, stepY + riserHeight / 2, stepZ + treadDepth / 2 - 0.04]}
+              color={stepColor}
+              roughness={0.6}
+            />
+            {/* Stringer (side support) — left */}
+            <Box
+              size={[0.2, riserHeight, treadDepth]}
+              position={[-w * 0.45, stepY + riserHeight / 2, stepZ]}
+              color={railColor}
+              roughness={0.7}
+            />
+            {/* Stringer — right */}
+            <Box
+              size={[0.2, riserHeight, treadDepth]}
+              position={[w * 0.45, stepY + riserHeight / 2, stepZ]}
+              color={railColor}
+              roughness={0.7}
+            />
+            {/* Balusters (vertical spindles) — left side */}
+            <Cyl
+              radiusTop={0.04}
+              radiusBottom={0.04}
+              height={riserHeight * 2.5}
+              position={[-w * 0.42, stepY + riserHeight * 1.25, stepZ]}
+              color={balusterColor}
+              roughness={0.4}
+              metalness={0.3}
+            />
+            {/* Balusters — right side */}
+            <Cyl
+              radiusTop={0.04}
+              radiusBottom={0.04}
+              height={riserHeight * 2.5}
+              position={[w * 0.42, stepY + riserHeight * 1.25, stepZ]}
+              color={balusterColor}
+              roughness={0.4}
+              metalness={0.3}
+            />
+          </group>
+        );
+      })}
+
+      {/* Handrail — left side (angled along the staircase) */}
+      <Box
+        size={[0.12, 0.08, l * 0.95]}
+        position={[-w * 0.42, floorHeight * 0.85, 0]}
+        rotation={[-Math.atan2(floorHeight, l), 0, 0]}
+        color={railColor}
+        roughness={0.4}
+      />
+      {/* Handrail — right side */}
+      <Box
+        size={[0.12, 0.08, l * 0.95]}
+        position={[w * 0.42, floorHeight * 0.85, 0]}
+        rotation={[-Math.atan2(floorHeight, l), 0, 0]}
+        color={railColor}
+        roughness={0.4}
+      />
+
+      {/* Top landing — connects to upper floor */}
+      <Box
+        size={[w * 0.85, 0.15, treadDepth * 1.5]}
+        position={[0, floorHeight - 0.075, -l / 2 + treadDepth * 0.75]}
+        color={stepColor}
+        roughness={0.5}
+      />
+
+      {/* Newel posts (thick posts at bottom and top) */}
+      <Box size={[0.3, floorHeight, 0.3]} position={[-w * 0.42, floorHeight / 2, l / 2 - 0.15]} color={railColor} roughness={0.5} />
+      <Box size={[0.3, floorHeight, 0.3]} position={[w * 0.42, floorHeight / 2, l / 2 - 0.15]} color={railColor} roughness={0.5} />
+      <Box size={[0.3, floorHeight, 0.3]} position={[-w * 0.42, floorHeight / 2, -l / 2 + 0.15]} color={railColor} roughness={0.5} />
+      <Box size={[0.3, floorHeight, 0.3]} position={[w * 0.42, floorHeight / 2, -l / 2 + 0.15]} color={railColor} roughness={0.5} />
+    </group>
+  );
+}
+
+// ---- Spiral/Circular Staircase ----
+// Wedge-shaped steps radiating from a central column, with a curved railing.
+function SpiralStaircaseModel({ w, l, color }: ModelProps) {
+  const floorHeight = 9;
+  const riserHeight = 0.55;
+  const stepCount = Math.floor(floorHeight / riserHeight);
+  const radius = Math.min(w, l) * 0.45;
+  const stairColor = color || '#e2e8f0';
+  const railColor = darkenHex(stairColor, 0.25);
+  const stepColor = darkenHex(stairColor, 0.05);
+  const anglePerStep = (Math.PI * 2 * 1.5) / stepCount; // 1.5 full rotations
+
+  return (
+    <group>
+      {/* Central column */}
+      <Cyl
+        radiusTop={0.25}
+        radiusBottom={0.25}
+        height={floorHeight}
+        position={[0, floorHeight / 2, 0]}
+        color={railColor}
+        roughness={0.4}
+        metalness={0.3}
+      />
+
+      {/* Wedge-shaped steps around the column */}
+      {Array.from({ length: stepCount }, (_, i) => {
+        const angle = i * anglePerStep;
+        const stepY = i * riserHeight;
+        return (
+          <group key={i} rotation={[0, angle, 0]}>
+            {/* Tread — wedge shaped (approximated with a thin box) */}
+            <Box
+              size={[radius * 2, 0.12, radius * 0.8]}
+              position={[radius * 0.5, stepY + riserHeight - 0.06, 0]}
+              color={stepColor}
+              roughness={0.5}
+            />
+            {/* Riser */}
+            <Box
+              size={[radius * 2, riserHeight, 0.06]}
+              position={[radius * 0.5, stepY + riserHeight / 2, radius * 0.35]}
+              color={stepColor}
+              roughness={0.6}
+            />
+            {/* Outer baluster */}
+            <Cyl
+              radiusTop={0.04}
+              radiusBottom={0.04}
+              height={riserHeight * 2}
+              position={[radius, stepY + riserHeight, 0]}
+              color={railColor}
+              roughness={0.4}
+              metalness={0.3}
+            />
+          </group>
+        );
+      })}
+
+      {/* Curved handrail — approximated with segmented boxes along the spiral */}
+      {Array.from({ length: stepCount }, (_, i) => {
+        const angle = i * anglePerStep;
+        const stepY = i * riserHeight + riserHeight * 1.5;
+        return (
+          <Box
+            key={`rail-${i}`}
+            size={[0.1, 0.06, radius * 0.5]}
+            position={[radius * 0.7, stepY, 0]}
+            rotation={[0, angle + anglePerStep / 2, 0]}
+            color={railColor}
+            roughness={0.4}
+          />
+        );
+      })}
+
+      {/* Top landing */}
+      <Box
+        size={[radius * 2.2, 0.15, radius * 0.8]}
+        position={[radius * 0.5, floorHeight - 0.075, 0]}
+        color={stepColor}
+        roughness={0.5}
+      />
+
+      {/* Base plate */}
+      <Cyl
+        radiusTop={radius * 0.8}
+        radiusBottom={radius * 0.8}
+        height={0.1}
+        position={[0, 0.05, 0]}
+        color={railColor}
+        roughness={0.7}
+      />
     </group>
   );
 }
