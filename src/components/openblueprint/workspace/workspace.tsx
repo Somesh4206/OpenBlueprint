@@ -412,46 +412,6 @@ export function Workspace({ config, design, projectId }: Props) {
                   showLabels={showLabels3d}
                   cameraView={cameraView}
                 />
-                {/* 3D furniture quick-add bar — add furniture in 3D view */}
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-card/90 backdrop-blur-md border border-border rounded-lg shadow-lg p-2 flex items-center gap-1.5 max-w-[90%] overflow-x-auto scroll-thin z-10">
-                  <span className="text-[10px] text-muted-foreground shrink-0 pl-1">Add:</span>
-                  {[
-                    { type: 'bed-double', label: 'Bed' },
-                    { type: 'sofa-3', label: 'Sofa' },
-                    { type: 'table-dining-6', label: 'Table' },
-                    { type: 'chair-dining', label: 'Chair' },
-                    { type: 'kitchen-counter', label: 'Counter' },
-                    { type: 'toilet', label: 'Toilet' },
-                    { type: 'desk', label: 'Desk' },
-                    { type: 'plant-small', label: 'Plant' },
-                    { type: 'car', label: 'Car' },
-                    { type: 'bike', label: 'Bike' },
-                  ].map((f) => (
-                    <button
-                      key={f.type}
-                      onClick={() => {
-                        const layout2 = useApp.getState().currentLayout;
-                        if (layout2) {
-                          addFurniture(f.type as never, layout2.plot.width / 2 - 3, layout2.plot.length / 2 - 3);
-                          showToast(`${f.label} added — switch to 2D to position`);
-                        }
-                      }}
-                      className="text-[10px] px-2.5 py-1.5 rounded-md border border-border bg-background hover:border-primary/40 hover:text-primary text-muted-foreground shrink-0"
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-                {/* 3D furniture edit hint */}
-                {selectedFurnitureId && (
-                  <div className="absolute top-3 right-3 bg-card/90 backdrop-blur-md border border-border rounded-lg shadow-lg p-2.5 z-10 max-w-[200px]">
-                    <p className="text-[10px] font-semibold mb-1">Furniture Selected</p>
-                    <p className="text-[9px] text-muted-foreground mb-2">Switch to 2D to move, resize, rotate, or delete this item.</p>
-                    <Button size="sm" variant="outline" className="h-6 w-full text-[10px] gap-1" onClick={() => setView2d(true)}>
-                      <Square className="size-3" /> Switch to 2D
-                    </Button>
-                  </div>
-                )}
               </div>
             )}
 
