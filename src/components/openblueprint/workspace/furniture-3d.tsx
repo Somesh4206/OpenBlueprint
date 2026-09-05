@@ -1139,92 +1139,102 @@ function StaircaseModel({ w, l, color }: ModelProps) {
 }
 
 // ---- Spiral/Circular Staircase ----
-// Wedge-shaped steps radiating from a central column, with a curved railing.
+// Matches reference: thick central column, wedge-shaped pie-slice steps,
+// vertical balusters on outer edge, curved handrail, matte light gray.
 function SpiralStaircaseModel({ w, l, color }: ModelProps) {
-  const floorHeight = 9;
-  const riserHeight = 0.55;
-  const stepCount = Math.floor(floorHeight / riserHeight);
-  const radius = Math.min(w, l) * 0.45;
+  const floorHeight = 9; // ft — reaches upper floor
+  const riserHeight = 0.5; // ft per step
+  const stepCount = Math.floor(floorHeight / riserHeight); // ~18 steps
+  const outerRadius = Math.min(w, l) * 0.48; // outer edge of steps
+  const innerRadius = Math.min(w, l) * 0.12; // central column radius
+  const stepArc = Math.PI / 6; // 30 degrees per step — wedge width
+  const totalRotation = stepCount * stepArc; // ~1.5 full turns
   const stairColor = color || '#e2e8f0';
-  const railColor = darkenHex(stairColor, 0.25);
-  const stepColor = darkenHex(stairColor, 0.05);
-  const anglePerStep = (Math.PI * 2 * 1.5) / stepCount; // 1.5 full rotations
+  const railColor = darkenHex(stairColor, 0.2);
+  const stepColor = darkenHex(stairColor, 0.03);
+  const treadThickness = 0.1;
 
   return (
     <group>
-      {/* Central column */}
+      {/* Thick central column */}
       <Cyl
-        radiusTop={0.25}
-        radiusBottom={0.25}
+        radiusTop={innerRadius}
+        radiusBottom={innerRadius * 1.1}
         height={floorHeight}
         position={[0, floorHeight / 2, 0]}
         color={railColor}
-        roughness={0.4}
-        metalness={0.3}
+        roughness={0.6}
       />
 
-      {/* Wedge-shaped steps around the column */}
+      {/* Wedge-shaped pie-slice steps — built with extruded geometry */}
       {Array.from({ length: stepCount }, (_, i) => {
-        const angle = i * anglePerStep;
+        const angle = i * stepArc;
         const stepY = i * riserHeight;
+        const stepWidth = outerRadius - innerRadius;
+        const stepMidRadius = (outerRadius + innerRadius) / 2;
+
         return (
           <group key={i} rotation={[0, angle, 0]}>
-            {/* Tread — wedge shaped (approximated with a thin box) */}
+            {/* Tread — wedge approximated as a thin angled box */}
             <Box
-              size={[radius * 2, 0.12, radius * 0.8]}
-              position={[radius * 0.5, stepY + riserHeight - 0.06, 0]}
+              size={[stepWidth, treadThickness, outerRadius * stepArc * 0.9]}
+              position={[stepMidRadius, stepY + riserHeight - treadThickness / 2, 0]}
+              rotation={[0, 0, 0]}
               color={stepColor}
               roughness={0.5}
             />
-            {/* Riser */}
+            {/* Riser — vertical face under the tread */}
             <Box
-              size={[radius * 2, riserHeight, 0.06]}
-              position={[radius * 0.5, stepY + riserHeight / 2, radius * 0.35]}
+              size={[stepWidth, riserHeight, 0.06]}
+              position={[stepMidRadius, stepY + riserHeight / 2, outerRadius * stepArc * 0.4]}
               color={stepColor}
               roughness={0.6}
             />
-            {/* Outer baluster */}
+            {/* Outer edge baluster — thin vertical spindle */}
             <Cyl
               radiusTop={0.04}
               radiusBottom={0.04}
-              height={riserHeight * 2}
-              position={[radius, stepY + riserHeight, 0]}
+              height={riserHeight * 1.8}
+              position={[outerRadius, stepY + riserHeight * 0.9, 0]}
               color={railColor}
               roughness={0.4}
-              metalness={0.3}
+              metalness={0.2}
             />
           </group>
         );
       })}
 
-      {/* Curved handrail — approximated with segmented boxes along the spiral */}
+      {/* Curved handrail — segmented boxes following the spiral on the outer edge */}
       {Array.from({ length: stepCount }, (_, i) => {
-        const angle = i * anglePerStep;
-        const stepY = i * riserHeight + riserHeight * 1.5;
+        const angle = i * stepArc;
+        const railY = i * riserHeight + riserHeight * 1.5;
         return (
-          <Box
-            key={`rail-${i}`}
-            size={[0.1, 0.06, radius * 0.5]}
-            position={[radius * 0.7, stepY, 0]}
-            rotation={[0, angle + anglePerStep / 2, 0]}
-            color={railColor}
-            roughness={0.4}
-          />
+          <group key={`rail-${i}`} rotation={[0, angle, 0]}>
+            <Box
+              size={[0.08, 0.06, outerRadius * stepArc * 0.9]}
+              position={[outerRadius, railY, 0]}
+              rotation={[0, 0, 0]}
+              color={railColor}
+              roughness={0.4}
+            />
+          </group>
         );
       })}
 
-      {/* Top landing */}
-      <Box
-        size={[radius * 2.2, 0.15, radius * 0.8]}
-        position={[radius * 0.5, floorHeight - 0.075, 0]}
+      {/* Top landing — circular platform at the top */}
+      <Cyl
+        radiusTop={outerRadius}
+        radiusBottom={outerRadius}
+        height={0.12}
+        position={[0, floorHeight - 0.06, 0]}
         color={stepColor}
         roughness={0.5}
       />
 
-      {/* Base plate */}
+      {/* Base plate — circular platform at the bottom */}
       <Cyl
-        radiusTop={radius * 0.8}
-        radiusBottom={radius * 0.8}
+        radiusTop={outerRadius}
+        radiusBottom={outerRadius * 1.05}
         height={0.1}
         position={[0, 0.05, 0]}
         color={railColor}
