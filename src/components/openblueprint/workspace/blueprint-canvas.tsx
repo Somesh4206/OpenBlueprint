@@ -34,7 +34,7 @@ interface Props {
   validation: ValidationResult;
 }
 
-type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'furniture-move' | 'furniture-rotate' | 'furniture-resize' | 'door-move' | null;
+type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'resize-n' | 'resize-s' | 'resize-w' | 'resize-e' | 'furniture-move' | 'furniture-rotate' | 'furniture-resize' | 'door-move' | null;
 
 interface DragState {
   roomId?: string;
@@ -301,6 +301,24 @@ export function BlueprintCanvas({
       const newX = snap(Math.max(0, Math.min(x2 - 4, r.x + dx)));
       const newY = snap(Math.max(0, Math.min(y2 - 4, r.y + dy)));
       patch = { x: newX, y: newY, width: snap(x2 - newX), length: snap(y2 - newY) };
+    } else if (drag.mode === 'resize-n') {
+      // Edge: top wall — move top edge up/down
+      const y2 = r.y + r.length;
+      const newY = snap(Math.max(0, Math.min(y2 - 4, r.y + dy)));
+      patch = { y: newY, length: snap(y2 - newY) };
+    } else if (drag.mode === 'resize-s') {
+      // Edge: bottom wall — move bottom edge up/down
+      const l = snap(Math.max(4, r.length + dy));
+      patch = { length: Math.min(l, plot.length - r.y) };
+    } else if (drag.mode === 'resize-w') {
+      // Edge: left wall — move left edge left/right
+      const x2 = r.x + r.width;
+      const newX = snap(Math.max(0, Math.min(x2 - 4, r.x + dx)));
+      patch = { x: newX, width: snap(x2 - newX) };
+    } else if (drag.mode === 'resize-e') {
+      // Edge: right wall — move right edge left/right
+      const w = snap(Math.max(4, r.width + dx));
+      patch = { width: Math.min(w, plot.width - r.x) };
     }
     onUpdateRoom(drag.roomId!, patch);
   }
@@ -589,10 +607,16 @@ function RoomShape({
 
   const handleSize = 8;
   const handles = selected ? [
+    // Corner handles
     { id: 'resize-nw', x: rx, y: ry, cursor: 'nwse-resize' },
     { id: 'resize-ne', x: rx + rw, y: ry, cursor: 'nesw-resize' },
     { id: 'resize-sw', x: rx, y: ry + rl, cursor: 'nesw-resize' },
     { id: 'resize-se', x: rx + rw, y: ry + rl, cursor: 'nwse-resize' },
+    // Edge midpoint handles — push/pull entire wall
+    { id: 'resize-n', x: rx + rw / 2, y: ry, cursor: 'ns-resize' },
+    { id: 'resize-s', x: rx + rw / 2, y: ry + rl, cursor: 'ns-resize' },
+    { id: 'resize-w', x: rx, y: ry + rl / 2, cursor: 'ew-resize' },
+    { id: 'resize-e', x: rx + rw, y: ry + rl / 2, cursor: 'ew-resize' },
   ] : [];
 
   return (
@@ -645,23 +669,66 @@ function RoomShape({
         </>
       )}
 
-      {/* Resize handles */}
-      {handles.map((h) => (
-        <rect
-          key={h.id}
-          data-room-id={room.id}
-          data-handle={h.id}
-          x={h.x - handleSize / 2}
-          y={h.y - handleSize / 2}
-          width={handleSize}
-          height={handleSize}
-          fill={accentColor}
-          stroke="white"
-          strokeWidth={1.5}
-          style={{ cursor: h.cursor }}
-          className="resize-handle"
-        />
-      ))}
+      {/* Resize handles — corner handles are squares, edge handles are circles */}
+      {handles.map((h) => {
+        const isCorner = h.id.includes('nw') || h.id.includes('ne') || h.id.includes('sw') || h.id.includes('se');
+        return isCorner ? (
+          <rect
+            key={h.id}
+            data-room-id={room.id}
+            data-handle={h.id}
+            x={h.x - handleSize / 2}
+            y={h.y - handleSize / 2}
+            width={handleSize}
+            height={handleSize}
+            fill={accentColor}
+            stroke="white"
+            strokeWidth={1.5}
+            style={{ cursor: h.cursor }}
+            className="resize-handle"
+          />
+        ) : (
+          <circle
+            key={h.id}
+            data-room-id={room.id}
+            data-handle={h.id}
+            cx={h.x}
+            cy={h.y}
+            r={handleSize / 2 + 1}
+            fill={accentColor}
+            stroke="white"
+            strokeWidth={1.5}
+            style={{ cursor: h.cursor }}
+            className="resize-handle"
+          />
+        );
+      })}
+
+      {/* Live dimension display when selected — shows W×L and area */}
+      {selected && (
+        <g pointerEvents="none">
+          {/* Width dimension on top */}
+          <line x1={rx} y1={ry - 16} x2={rx + rw} y2={ry - 16} stroke={accentColor} strokeWidth={0.8} opacity={0.6} />
+          <line x1={rx} y1={ry - 19} x2={rx} y2={ry - 13} stroke={accentColor} strokeWidth={0.8} opacity={0.6} />
+          <line x1={rx + rw} y1={ry - 19} x2={rx + rw} y2={ry - 13} stroke={accentColor} strokeWidth={0.8} opacity={0.6} />
+          <rect x={rx + rw / 2 - 20} y={ry - 24} width={40} height={14} fill="white" stroke={accentColor} strokeWidth={0.5} rx={2} />
+          <text x={rx + rw / 2} y={ry - 14} textAnchor="middle" fontSize={9} fill={accentColor} fontWeight={600} className="tech-num">
+            {fmt(room.width)}'
+          </text>
+          {/* Length dimension on left */}
+          <line x1={rx - 16} y1={ry} x2={rx - 16} y2={ry + rl} stroke={accentColor} strokeWidth={0.8} opacity={0.6} />
+          <line x1={rx - 19} y1={ry} x2={rx - 13} y2={ry} stroke={accentColor} strokeWidth={0.8} opacity={0.6} />
+          <line x1={rx - 19} y1={ry + rl} x2={rx - 13} y2={ry + rl} stroke={accentColor} strokeWidth={0.8} opacity={0.6} />
+          <rect x={rx - 28} y={ry + rl / 2 - 7} width={24} height={14} fill="white" stroke={accentColor} strokeWidth={0.5} rx={2} />
+          <text x={rx - 16} y={ry + rl / 2 + 3} textAnchor="middle" fontSize={9} fill={accentColor} fontWeight={600} className="tech-num" transform={`rotate(-90 ${rx - 16} ${ry + rl / 2 + 3})`}>
+            {fmt(room.length)}'
+          </text>
+          {/* Area label */}
+          <text x={rx + rw / 2} y={ry + rl / 2 + 26} textAnchor="middle" fontSize={8} fill={accentColor} fontWeight={500} className="tech-num" opacity={0.8}>
+            {Math.round(room.width * room.length)} sq.ft
+          </text>
+        </g>
+      )}
     </g>
   );
 }
