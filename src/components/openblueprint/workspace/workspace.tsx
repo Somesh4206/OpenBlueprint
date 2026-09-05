@@ -49,6 +49,8 @@ import {
   Building2,
   ChevronUp,
   ChevronDown,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -253,6 +255,27 @@ export function Workspace({ config, design, projectId }: Props) {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>AI Design Assistant</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {/* Undo/Redo buttons */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="size-8" onClick={() => useApp.getState().undo()} disabled={!useApp.getState().canUndo()}>
+                  <Undo2 className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Undo (Ctrl+Z)</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="size-8" onClick={() => useApp.getState().redo()} disabled={!useApp.getState().canRedo()}>
+                  <Redo2 className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Redo (Ctrl+Y)</TooltipContent>
             </Tooltip>
           </TooltipProvider>
           <Button variant="outline" size="sm" onClick={saveProject} className="gap-1.5">

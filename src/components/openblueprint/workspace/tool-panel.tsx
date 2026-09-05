@@ -298,6 +298,38 @@ function RoomToolPanel(props: Props) {
             <p className="text-[10px] text-muted-foreground mt-1 tech-num">Area: {Math.round(selectedRoom.width * selectedRoom.length)} sq.ft · Min: {cat.minWidth}×{cat.minLength}</p>
           </div>
 
+          {/* Room shape — rect, L-shape, T-shape */}
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1.5 block">Room Shape</Label>
+            <div className="grid grid-cols-3 gap-1">
+              {[
+                { v: 'rect', l: 'Rectangle' },
+                { v: 'l-shape', l: 'L-Shape' },
+                { v: 't-shape', l: 'T-Shape' },
+              ].map((s) => (
+                <button
+                  key={s.v}
+                  onClick={() => onUpdateRoom(selectedRoom.id, { shape: s.v as never })}
+                  className={cn('text-[10px] py-1.5 rounded border', (selectedRoom.shape || 'rect') === s.v ? 'border-primary bg-primary/5 text-primary font-medium' : 'border-border text-muted-foreground hover:border-cyan/40')}
+                >
+                  {s.l}
+                </button>
+              ))}
+            </div>
+            {(selectedRoom.shape === 'l-shape' || selectedRoom.shape === 't-shape') && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[10px] text-muted-foreground">Notch Width</span>
+                  <Input type="number" step="0.5" min="2" value={selectedRoom.notchW || Math.round(selectedRoom.width * 0.4)} onChange={(e) => onUpdateRoom(selectedRoom.id, { notchW: Number(e.target.value) })} className="tech-num h-7 text-xs" />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">Notch Length</span>
+                  <Input type="number" step="0.5" min="2" value={selectedRoom.notchL || Math.round(selectedRoom.length * 0.4)} onChange={(e) => onUpdateRoom(selectedRoom.id, { notchL: Number(e.target.value) })} className="tech-num h-7 text-xs" />
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Floor — move room to different floor */}
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">Move to Floor</Label>

@@ -17,6 +17,8 @@ export type RoomType =
   | 'foyer'
   | 'store';
 
+export type RoomShape = 'rect' | 'l-shape' | 't-shape';
+
 export interface RoomRect {
   id: string;
   type: RoomType;
@@ -32,6 +34,12 @@ export interface RoomRect {
   // For split rooms: the ID of the other half. Split rooms share an open boundary
   // (no wall between them) so they flow as one space.
   splitPartner?: string;
+  // Room shape: 'rect' (default), 'l-shape' (L-shaped), 't-shape' (T-shaped)
+  shape?: RoomShape;
+  // For L-shape: the notch dimensions. The L is formed by cutting a notch from
+  // the bottom-right corner. notchW × notchL is the cutout size.
+  notchW?: number;
+  notchL?: number;
 }
 
 // ---- Furniture ----

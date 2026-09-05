@@ -4,6 +4,7 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { LayoutData, ProjectConfig, RoomRect, ValidationResult, DoorMarker, WindowMarker, FurnitureItem, FurnitureType } from '@/lib/types';
 import { ROOM_CATALOG } from '@/lib/room-catalog';
 import { FURNITURE_MAP } from '@/lib/furniture-catalog';
+import { useApp } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { Maximize, Ruler } from 'lucide-react';
@@ -371,6 +372,15 @@ export function BlueprintCanvas({
           onUpdateFurniture(selectedFurnitureId, { rotation: ((f.rotation + 90) % 360 + 360) % 360 });
         }
       }
+      // Ctrl+Z = Undo, Ctrl+Y or Ctrl+Shift+Z = Redo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        useApp.getState().undo();
+      }
+      if (((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        useApp.getState().redo();
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -619,26 +629,58 @@ function RoomShape({
     { id: 'resize-e', x: rx + rw, y: ry + rl / 2, cursor: 'ew-resize' },
   ] : [];
 
+  // Compute polygon points for non-rectangular shapes
+  const shape = room.shape || 'rect';
+  const notchW = room.notchW || room.width * 0.4;
+  const notchL = room.notchL || room.length * 0.4;
+  const notchWPx = notchW * scale;
+  const notchLPx = notchL * scale;
+
+  // L-shape polygon: full rect minus bottom-right notch
+  const lShapePoints = `${rx},${ry} ${rx + rw},${ry} ${rx + rw},${ry + rl - notchLPx} ${rx + rw - notchWPx},${ry + rl - notchLPx} ${rx + rw - notchWPx},${ry + rl} ${rx},${ry + rl}`;
+  // T-shape polygon: full rect minus bottom-right notch AND bottom-left notch
+  const tShapePoints = `${rx},${ry} ${rx + rw},${ry} ${rx + rw},${ry + rl - notchLPx} ${rx + rw - notchWPx},${ry + rl - notchLPx} ${rx + rw - notchWPx},${ry + rl} ${rx + notchWPx},${ry + rl} ${rx + notchWPx},${ry + rl - notchLPx} ${rx},${ry + rl - notchLPx}`;
+
+  const shapePoints = shape === 'l-shape' ? lShapePoints : shape === 't-shape' ? tShapePoints : null;
+
   return (
     <g style={{ opacity }} className={selected ? '' : 'cursor-pointer'}>
-      {/* Room fill — no stroke (walls drawn as separate lines below) */}
-      <rect
-        data-room-id={room.id}
-        x={rx}
-        y={ry}
-        width={rw}
-        height={rl}
-        fill={cat.color}
-        stroke="none"
-        onClick={onSelect}
-      />
-      {/* Wall segments — skip the shared edge for split rooms and staircases */}
-      <g pointerEvents="none">
-        {!skipTop && <line x1={rx} y1={ry} x2={rx + rw} y2={ry} stroke={stroke} strokeWidth={sw} />}
-        {!skipBottom && <line x1={rx} y1={ry + rl} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
-        {!skipLeft && <line x1={rx} y1={ry} x2={rx} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
-        {!skipRight && <line x1={rx + rw} y1={ry} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
-      </g>
+      {/* Room fill — polygon for L/T shapes, rect for regular */}
+      {shapePoints ? (
+        <polygon
+          data-room-id={room.id}
+          points={shapePoints}
+          fill={cat.color}
+          stroke="none"
+          onClick={onSelect}
+          style={{ pointerEvents: 'all' }}
+        />
+      ) : (
+        <rect
+          data-room-id={room.id}
+          x={rx}
+          y={ry}
+          width={rw}
+          height={rl}
+          fill={cat.color}
+          stroke="none"
+          onClick={onSelect}
+        />
+      )}
+
+      {/* Wall segments — for L/T shapes, draw the polygon outline */}
+      {shapePoints ? (
+        <g pointerEvents="none">
+          <polygon points={shapePoints} fill="none" stroke={stroke} strokeWidth={sw} />
+        </g>
+      ) : (
+        <g pointerEvents="none">
+          {!skipTop && <line x1={rx} y1={ry} x2={rx + rw} y2={ry} stroke={stroke} strokeWidth={sw} />}
+          {!skipBottom && <line x1={rx} y1={ry + rl} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+          {!skipLeft && <line x1={rx} y1={ry} x2={rx} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+          {!skipRight && <line x1={rx + rw} y1={ry} x2={rx + rw} y2={ry + rl} stroke={stroke} strokeWidth={sw} />}
+        </g>
+      )}
       {hasWarning && !hasError && (
         <rect data-room-id={room.id} x={rx} y={ry} width={rw} height={rl} fill="none" stroke="#d97706" strokeWidth={2} strokeDasharray="4 3" onClick={onSelect} />
       )}

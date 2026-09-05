@@ -45,6 +45,9 @@ interface AppState {
   aiPanelOpen: boolean;
   rightPanel: 'validation' | 'space' | 'cost' | 'materials' | 'style' | 'versions' | 'insights' | 'knowledge';
   exportOpen: boolean;
+  // Undo/Redo history
+  _undoStack: LayoutData[];
+  _redoStack: LayoutData[];
   compareOpen: boolean;
 
   setCurrentDesign: (d: ScoredLayout) => void;
@@ -69,6 +72,11 @@ interface AppState {
   addFurniture: (type: FurnitureType, x: number, y: number) => void;
   updateFurniture: (id: string, patch: Partial<FurnitureItem>) => void;
   deleteFurniture: (id: string) => void;
+  // Undo/Redo
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
 }
 
 const defaultConfig: ProjectConfig = {
@@ -188,10 +196,22 @@ export const useApp = create<AppState>((set, get) => ({
   aiPanelOpen: true,
   rightPanel: 'validation',
   exportOpen: false,
+  _undoStack: [],
+  _redoStack: [],
   compareOpen: false,
 
   setCurrentDesign: (d) => set({ currentDesign: d, currentLayout: d.layout }),
-  setCurrentLayout: (l) => set({ currentLayout: l }),
+  setCurrentLayout: (l) => {
+    const current = get().currentLayout;
+    if (current) {
+      const undoStack = get()._undoStack || [];
+      set({
+        _undoStack: [...undoStack, JSON.parse(JSON.stringify(current))].slice(-50),
+        _redoStack: [],
+      });
+    }
+    set({ currentLayout: l });
+  },
   setSelectedRoom: (id) => set({ selectedRoomId: id, selectedFurnitureId: null }),
   setSelectedFurniture: (id) => set({ selectedFurnitureId: id, selectedRoomId: null }),
   setFurniturePanelOpen: (b) => set({ furniturePanelOpen: b }),
@@ -245,6 +265,41 @@ export const useApp = create<AppState>((set, get) => ({
   deleteFurniture: (id) => {
     const layout = get().currentLayout;
     if (!layout) return;
+    pushHistory(get, set);
     set({ currentLayout: { ...layout, furniture: layout.furniture.filter((f) => f.id !== id) }, selectedFurnitureId: null });
   },
+  undo: () => {
+    const state = get();
+    if (state._undoStack.length === 0 || !state.currentLayout) return;
+    const prev = state._undoStack[state._undoStack.length - 1];
+    set({
+      _undoStack: state._undoStack.slice(0, -1),
+      _redoStack: [...state._redoStack, state.currentLayout as LayoutData],
+      currentLayout: prev,
+    });
+  },
+  redo: () => {
+    const state = get();
+    if (state._redoStack.length === 0 || !state.currentLayout) return;
+    const next = state._redoStack[state._redoStack.length - 1];
+    set({
+      _redoStack: state._redoStack.slice(0, -1),
+      _undoStack: [...state._undoStack, state.currentLayout as LayoutData],
+      currentLayout: next,
+    });
+  },
+  canUndo: () => get()._undoStack.length > 0,
+  canRedo: () => get()._redoStack.length > 0,
 }));
+
+// Helper: push current layout to undo stack before a mutation
+function pushHistory(get: () => AppState, set: (partial: Partial<AppState>) => void) {
+  const current = get().currentLayout;
+  if (current) {
+    const undoStack = get()._undoStack || [];
+    set({
+      _undoStack: [...undoStack, JSON.parse(JSON.stringify(current))].slice(-50),
+      _redoStack: [],
+    });
+  }
+}
