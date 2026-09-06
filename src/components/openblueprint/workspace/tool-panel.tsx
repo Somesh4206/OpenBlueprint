@@ -241,17 +241,93 @@ function RoomToolPanel(props: Props) {
   if (!selectedRoom) {
     return (
       <div className="flex flex-col h-full">
-        <PanelHeader icon={Square} title="Room Tool" subtitle="Click a room to edit, or click empty space to add" />
-        <div className="p-3 space-y-2">
-          <p className="text-xs text-muted-foreground mb-2">Quick add room:</p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {(['bedroom', 'bathroom', 'kitchen', 'living', 'dining', 'office', 'pooja', 'utility', 'store', 'balcony'] as RoomType[]).map((t) => (
-              <button key={t} onClick={() => props.onAddRoom?.(t)} className="text-[10px] px-2 py-1.5 rounded border border-border text-muted-foreground hover:border-primary/40 hover:text-foreground capitalize text-left">
-                {ROOM_CATALOG[t].label}
+        <PanelHeader icon={Square} title="Room Tool" subtitle="Click a room to edit, or add a new room below" />
+        <ScrollArea className="flex-1">
+        <div className="p-3 space-y-3">
+          {/* Quick add rectangular rooms */}
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Add Room</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {(['bedroom', 'bathroom', 'kitchen', 'living', 'dining', 'office', 'pooja', 'utility', 'store', 'balcony'] as RoomType[]).map((t) => (
+                <button key={t} onClick={() => props.onAddRoom?.(t)} className="text-[10px] px-2 py-1.5 rounded border border-border text-muted-foreground hover:border-primary/40 hover:text-foreground capitalize text-left">
+                  {ROOM_CATALOG[t].label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Add L-shape and T-shape rooms */}
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground mb-2">Add Shaped Room</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                onClick={() => {
+                  props.onAddRoom?.('living');
+                  setTimeout(() => {
+                    const layout2 = useApp.getState().currentLayout;
+                    if (layout2) {
+                      const last = layout2.rooms[layout2.rooms.length - 1];
+                      if (last) {
+                        const w = last.width;
+                        const l = last.length;
+                        useApp.getState().setCurrentLayout({
+                          ...layout2,
+                          rooms: layout2.rooms.map((r) => r.id === last.id ? {
+                            ...r,
+                            name: 'L-Shaped Room',
+                            shape: 'l-shape' as const,
+                            notchW: Math.round(w * 0.4 * 2) / 2,
+                            notchL: Math.round(l * 0.4 * 2) / 2,
+                          } : r),
+                        });
+                      }
+                    }
+                  }, 50);
+                }}
+                className="text-[10px] px-2 py-2 rounded border border-border text-muted-foreground hover:border-primary/40 hover:text-foreground text-left flex items-center gap-1.5"
+              >
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M2 2 H18 V12 H10 V18 H2 Z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" fillOpacity="0.15" /></svg>
+                L-Shape
               </button>
-            ))}
+              <button
+                onClick={() => {
+                  props.onAddRoom?.('living');
+                  setTimeout(() => {
+                    const layout2 = useApp.getState().currentLayout;
+                    if (layout2) {
+                      const last = layout2.rooms[layout2.rooms.length - 1];
+                      if (last) {
+                        const w = last.width;
+                        const l = last.length;
+                        useApp.getState().setCurrentLayout({
+                          ...layout2,
+                          rooms: layout2.rooms.map((r) => r.id === last.id ? {
+                            ...r,
+                            name: 'T-Shaped Room',
+                            shape: 't-shape' as const,
+                            notchW: Math.round(w * 0.3 * 2) / 2,
+                            notchL: Math.round(l * 0.4 * 2) / 2,
+                          } : r),
+                        });
+                      }
+                    }
+                  }, 50);
+                }}
+                className="text-[10px] px-2 py-2 rounded border border-border text-muted-foreground hover:border-primary/40 hover:text-foreground text-left flex items-center gap-1.5"
+              >
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M2 2 H18 V10 H14 V18 H6 V10 H2 Z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" fillOpacity="0.15" /></svg>
+                T-Shape
+              </button>
+            </div>
+          </div>
+
+          <div className="p-2 rounded bg-muted/40 text-[10px] text-muted-foreground">
+            <p>• Click a room on the canvas to edit its shape, size, and position</p>
+            <p>• Drag corner/edge handles to resize</p>
+            <p>• Use Ctrl+Z to undo, Ctrl+Y to redo</p>
           </div>
         </div>
+        </ScrollArea>
       </div>
     );
   }
