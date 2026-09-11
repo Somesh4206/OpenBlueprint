@@ -51,6 +51,9 @@ import {
   ChevronDown,
   Undo2,
   Redo2,
+  Sun,
+  Shield,
+  FileText,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -109,6 +112,11 @@ const RIGHT_TABS = [
   { id: 'insights', icon: Lightbulb, label: 'Insights' },
   { id: 'knowledge', icon: BookOpen, label: 'Knowledge' },
   { id: 'versions', icon: History, label: 'Versions' },
+  { id: 'sunlight', icon: Sun, label: 'Sun' },
+  { id: 'vastu', icon: Shield, label: 'Vastu' },
+  { id: 'boq', icon: FileText, label: 'BOQ' },
+  { id: 'structural', icon: Building2, label: 'Struct' },
+  { id: 'codes', icon: Shield, label: 'Codes' },
 ] as const;
 
 export function Workspace({ config, design, projectId }: Props) {
@@ -501,6 +509,31 @@ export function Workspace({ config, design, projectId }: Props) {
               {rightPanel === 'insights' && <InsightsPanel insights={insights} />}
               {rightPanel === 'knowledge' && <KnowledgePanel />}
               {rightPanel === 'versions' && <VersionsPanel versions={versions} onRestore={(l) => { setLayout(l); showToast('Version restored'); }} onSave={saveVersion} />}
+              {rightPanel === 'sunlight' && (
+                <FeatureGate tier="starter" requiredTier="pro" featureName="Sunlight & Shadow Analysis">
+                  <SunlightAnalysis layout={layout} accentColor={accentColor} />
+                </FeatureGate>
+              )}
+              {rightPanel === 'vastu' && (
+                <FeatureGate tier="starter" requiredTier="pro" featureName="Vastu Compliance Report">
+                  <VastuReport config={{ rooms: layout.rooms as never, plot: layout.plot }} />
+                </FeatureGate>
+              )}
+              {rightPanel === 'boq' && (
+                <FeatureGate tier="starter" requiredTier="studio" featureName="Bill of Quantities (BOQ)">
+                  <BOQPanel layout={layout} finish={finish} />
+                </FeatureGate>
+              )}
+              {rightPanel === 'structural' && (
+                <FeatureGate tier="starter" requiredTier="studio" featureName="Structural Analysis">
+                  <StructuralAnalysis layout={layout} />
+                </FeatureGate>
+              )}
+              {rightPanel === 'codes' && (
+                <FeatureGate tier="starter" requiredTier="studio" featureName="City Code Checker">
+                  <CityCodeChecker plot={layout.plot} floors={layout.floors} />
+                </FeatureGate>
+              )}
             </div>
           </ScrollArea>
         </aside>
@@ -882,3 +915,4 @@ function VersionsPanel({ versions, onRestore, onSave }: {
 
 // ExportModal is in a separate file
 import { ExportModal } from './export-modal';
+import { SunlightAnalysis, VastuReport, BOQPanel, StructuralAnalysis, CityCodeChecker, FeatureGate, type PlanTier } from '@/components/openblueprint/pro/pro-features';

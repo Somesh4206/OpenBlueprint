@@ -43,7 +43,7 @@ interface AppState {
   finish: FinishGrade;
   style: DesignStyle;
   aiPanelOpen: boolean;
-  rightPanel: 'validation' | 'space' | 'cost' | 'materials' | 'style' | 'versions' | 'insights' | 'knowledge';
+  rightPanel: 'validation' | 'space' | 'cost' | 'materials' | 'style' | 'versions' | 'insights' | 'knowledge' | 'sunlight' | 'vastu' | 'boq' | 'structural' | 'codes';
   exportOpen: boolean;
   // Undo/Redo history
   _undoStack: LayoutData[];
