@@ -35,7 +35,7 @@ interface Props {
   validation: ValidationResult;
 }
 
-type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'resize-n' | 'resize-s' | 'resize-w' | 'resize-e' | 'furniture-move' | 'furniture-rotate' | 'furniture-resize' | 'door-move' | null;
+type DragMode = 'move' | 'resize-se' | 'resize-sw' | 'resize-ne' | 'resize-nw' | 'resize-n' | 'resize-s' | 'resize-w' | 'resize-e' | 'resize-notch' | 'resize-notch2' | 'furniture-move' | 'furniture-rotate' | 'furniture-resize' | 'door-move' | null;
 
 interface DragState {
   roomId?: string;
@@ -320,6 +320,17 @@ export function BlueprintCanvas({
       // Edge: right wall — move right edge left/right
       const w = snap(Math.max(4, r.width + dx));
       patch = { width: Math.min(w, plot.width - r.x) };
+    } else if (drag.mode === 'resize-notch') {
+      // Dragging the inner vertex of an L-shape or T-shape room
+      // This changes both notchW and notchL simultaneously
+      const newNotchW = snap(Math.max(2, Math.min(r.width - 4, r.width - dx)));
+      const newNotchL = snap(Math.max(2, Math.min(r.length - 4, r.length - dy)));
+      patch = { notchW: newNotchW, notchL: newNotchL };
+    } else if (drag.mode === 'resize-notch2') {
+      // Dragging the LEFT inner vertex of a T-shape (only affects notchW on left side)
+      const newNotchW = snap(Math.max(2, Math.min(r.width - 4, r.width - dx)));
+      const newNotchL = snap(Math.max(2, Math.min(r.length - 4, r.length - dy)));
+      patch = { notchW: newNotchW, notchL: newNotchL };
     }
     onUpdateRoom(drag.roomId!, patch);
   }
@@ -629,6 +640,23 @@ function RoomShape({
     { id: 'resize-e', x: rx + rw, y: ry + rl / 2, cursor: 'ew-resize' },
   ] : [];
 
+  // For L-shape: add inner vertex handle (the notch corner) that can be dragged
+  // For T-shape: add two inner vertex handles (left notch + right notch corners)
+  const shapeType = room.shape || 'rect';
+  const nW = (room.notchW || room.width * 0.4);
+  const nL = (room.notchL || room.length * 0.4);
+  if (selected && (shapeType === 'l-shape' || shapeType === 't-shape')) {
+    // L-shape inner vertex: at (rx + rw - notchWPx, ry + rl - notchLPx)
+    const innerX = rx + rw - nW * scale;
+    const innerY = ry + rl - nL * scale;
+    handles.push({ id: 'resize-notch', x: innerX, y: innerY, cursor: 'move' });
+    if (shapeType === 't-shape') {
+      // T-shape has a second inner vertex on the left side
+      const innerX2 = rx + nW * scale;
+      handles.push({ id: 'resize-notch2', x: innerX2, y: innerY, cursor: 'move' });
+    }
+  }
+
   // Compute polygon points for non-rectangular shapes
   const shape = room.shape || 'rect';
   const notchW = room.notchW || room.width * 0.4;
@@ -714,6 +742,26 @@ function RoomShape({
       {/* Resize handles — corner handles are squares, edge handles are circles */}
       {handles.map((h) => {
         const isCorner = h.id.includes('nw') || h.id.includes('ne') || h.id.includes('sw') || h.id.includes('se');
+        // Notch handles (inner vertices) — larger, distinct color, with crosshair
+        if (h.id === 'resize-notch' || h.id === 'resize-notch2') {
+          return (
+            <g key={h.id} data-room-id={room.id} data-handle={h.id} style={{ cursor: 'move' }}>
+              <circle
+                cx={h.x}
+                cy={h.y}
+                r={handleSize / 2 + 3}
+                fill="#2b6fe0"
+                stroke="white"
+                strokeWidth={2}
+                className="resize-handle"
+                style={{ pointerEvents: 'all' }}
+              />
+              {/* Crosshair indicator */}
+              <line x1={h.x - 5} y1={h.y} x2={h.x + 5} y2={h.y} stroke="white" strokeWidth={1} pointerEvents="none" />
+              <line x1={h.x} y1={h.y - 5} x2={h.x} y2={h.y + 5} stroke="white" strokeWidth={1} pointerEvents="none" />
+            </g>
+          );
+        }
         return isCorner ? (
           <rect
             key={h.id}
