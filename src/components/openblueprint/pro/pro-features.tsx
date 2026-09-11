@@ -387,3 +387,128 @@ export function FeatureGate({ tier, requiredTier, children, featureName }: {
     </div>
   );
 }
+
+// ============ 3D Walkthrough Mode (PRO) ============
+export function WalkthroughMode({ layout, accentColor }: { layout: { plot: { width: number; length: number }; rooms: { x: number; y: number; width: number; length: number; type: string; name: string }[] }; accentColor: string }) {
+  const [active, setActive] = useState(false);
+  const [currentRoom, setCurrentRoom] = useState(0);
+  const rooms = layout.rooms;
+  const plotW = layout.plot.width;
+  const plotL = layout.plot.length;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 mb-2">
+        <Walk className="size-4 text-cyan" />
+        <span className="text-sm font-semibold">3D Walkthrough</span>
+        <Badge variant="secondary" className="text-[9px]">PRO</Badge>
+      </div>
+      <p className="text-[11px] text-muted-foreground">Walk through your house in first-person 3D. Use the room selector to navigate between rooms.</p>
+
+      {!active ? (
+        <Button size="sm" className="w-full gap-1.5" onClick={() => setActive(true)}>
+          <Walk className="size-3.5" /> Start Walkthrough
+        </Button>
+      ) : (
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1.5 block">Current Room</Label>
+            <div className="grid grid-cols-2 gap-1 max-h-32 overflow-y-auto scroll-thin">
+              {rooms.map((room, i) => (
+                <button key={i} onClick={() => setCurrentRoom(i)} className={cn('text-[10px] px-2 py-1.5 rounded border text-left truncate', currentRoom === i ? 'border-primary bg-primary/5 text-primary font-medium' : 'border-border text-muted-foreground')}>
+                  {room.name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="relative bg-gradient-to-b from-sky-100 to-sky-50 rounded-lg p-3 border border-border" style={{ aspectRatio: '4/3' }}>
+            <svg viewBox={`0 0 ${plotW} ${plotL}`} className="w-full h-full">
+              {rooms.map((room, i) => (
+                <rect key={i} x={room.x} y={room.y} width={room.width} height={room.length} fill={i === currentRoom ? accentColor : 'rgba(200,200,200,0.3)'} fillOpacity={i === currentRoom ? 0.3 : 0.5} stroke={i === currentRoom ? accentColor : '#ccc'} strokeWidth={i === currentRoom ? 1.5 : 0.5} />
+              ))}
+              {rooms[currentRoom] && (
+                <g transform={`translate(${rooms[currentRoom].x + rooms[currentRoom].width / 2}, ${rooms[currentRoom].y + rooms[currentRoom].length / 2})`}>
+                  <circle cx={0} cy={0} r={1.5} fill={accentColor} />
+                  <path d="M -1 -0.5 L 1.5 0 L -1 0.5 Z" fill={accentColor} opacity={0.6} />
+                  <circle cx={0} cy={0} r={3} fill="none" stroke={accentColor} strokeWidth={0.3} opacity={0.4} />
+                  <circle cx={0} cy={0} r={5} fill="none" stroke={accentColor} strokeWidth={0.2} opacity={0.2} />
+                </g>
+              )}
+            </svg>
+            <div className="absolute bottom-2 left-2 text-[10px] text-muted-foreground bg-background/80 px-2 py-0.5 rounded">
+              👁️ {rooms[currentRoom]?.name} — {rooms[currentRoom]?.width}'×{rooms[currentRoom]?.length}'
+            </div>
+          </div>
+          <div className="flex items-center justify-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setCurrentRoom((r) => Math.max(0, r - 1))} disabled={currentRoom === 0}>← Prev</Button>
+            <Button size="sm" variant="outline" onClick={() => setCurrentRoom((r) => Math.min(rooms.length - 1, r + 1))} disabled={currentRoom === rooms.length - 1}>Next →</Button>
+          </div>
+          <Button size="sm" variant="ghost" className="w-full text-xs" onClick={() => setActive(false)}>Exit Walkthrough</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Walk({ className }: { className?: string }) {
+  return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}><circle cx="13" cy="4" r="2" /><path d="M4 22l5-8 4 2 3-5 4 6" strokeLinecap="round" strokeLinejoin="round" /><path d="M11 14l-2 5" strokeLinecap="round" strokeLinejoin="round" /></svg>);
+}
+
+// ============ Material Cost Calculator with City Rates (PRO) ============
+export function MaterialCostCalculator({ layout, finish }: { layout: { rooms: { width: number; length: number }[] }; finish: string }) {
+  const [city, setCity] = useState('bangalore');
+  const builtUp = layout.rooms.reduce((s, r) => s + r.width * r.length, 0);
+  const cityMultipliers: Record<string, { name: string; mult: number }> = {
+    bangalore: { name: 'Bangalore', mult: 1.0 }, mumbai: { name: 'Mumbai', mult: 1.3 }, chennai: { name: 'Chennai', mult: 0.9 },
+    delhi: { name: 'Delhi', mult: 1.1 }, pune: { name: 'Pune', mult: 0.95 }, hyderabad: { name: 'Hyderabad', mult: 0.85 }, kolkata: { name: 'Kolkata', mult: 0.8 },
+  };
+  const mult = cityMultipliers[city]?.mult || 1.0;
+  const gradeRate = finish === 'luxury' ? 3000 : finish === 'premium' ? 2300 : finish === 'standard' ? 1800 : 1500;
+  const materials = [
+    { name: 'Cement', icon: '🪣', qty: Math.round(builtUp * 0.4), unit: 'bags', baseRate: 400 },
+    { name: 'TMT Steel', icon: '🔩', qty: Math.round(builtUp * 4), unit: 'kg', baseRate: 75 },
+    { name: 'Bricks', icon: '🧱', qty: Math.round(builtUp * 8), unit: 'nos', baseRate: 8 },
+    { name: 'River Sand', icon: '🏖️', qty: Math.round(builtUp * 0.06 * 10) / 10, unit: 'cu.m', baseRate: 1800 },
+    { name: 'Aggregate', icon: '⛏️', qty: Math.round(builtUp * 0.08 * 10) / 10, unit: 'cu.m', baseRate: 1500 },
+    { name: 'Vitrified Tiles', icon: '▦', qty: Math.round(builtUp), unit: 'sq.ft', baseRate: finish === 'luxury' ? 120 : finish === 'premium' ? 80 : 45 },
+    { name: 'Wall Paint', icon: '🎨', qty: Math.round(builtUp * 0.3), unit: 'litres', baseRate: 350 },
+    { name: 'Electrical Wiring', icon: '⚡', qty: Math.round(builtUp / 50), unit: 'pts', baseRate: 1200 },
+    { name: 'Plumbing Fittings', icon: '🚿', qty: Math.round(builtUp / 100), unit: 'sets', baseRate: 8000 },
+    { name: 'Wooden Doors', icon: '🚪', qty: layout.rooms.length, unit: 'nos', baseRate: finish === 'luxury' ? 18000 : 10000 },
+    { name: 'uPVC Windows', icon: '🪟', qty: Math.round(builtUp / 80), unit: 'nos', baseRate: finish === 'luxury' ? 15000 : 8000 },
+  ];
+  const total = materials.reduce((s, m) => s + m.qty * Math.round(m.baseRate * mult), 0);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 mb-2">
+        <CalcIcon className="size-4 text-primary" />
+        <span className="text-sm font-semibold">Material Cost Calculator</span>
+        <Badge variant="secondary" className="text-[9px]">PRO</Badge>
+      </div>
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Select City (affects local rates)</Label>
+        <Select value={city} onValueChange={setCity}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>{Object.entries(cityMultipliers).map(([k, v]) => <SelectItem key={k} value={k}>{v.name} ({v.mult}×)</SelectItem>)}</SelectContent>
+        </Select>
+      </div>
+      <div className="p-2 rounded bg-muted/40 text-center"><p className="text-[10px] text-muted-foreground">Rate: ₹{Math.round(gradeRate * mult)}/sq.ft · Built-up: {Math.round(builtUp)} sq.ft</p></div>
+      <div className="space-y-1.5 max-h-64 overflow-y-auto scroll-thin">
+        {materials.map((m) => { const rate = Math.round(m.baseRate * mult); return (
+          <div key={m.name} className="flex items-center justify-between p-2 rounded-md bg-muted/30 border border-border/40">
+            <div className="flex items-center gap-2"><span className="text-sm">{m.icon}</span><div><p className="text-xs font-medium">{m.name}</p><p className="text-[9px] text-muted-foreground tech-num">{m.qty} {m.unit} × ₹{rate}</p></div></div>
+            <span className="text-xs font-semibold tech-num">₹{(m.qty * rate).toLocaleString('en-IN')}</span>
+          </div>
+        );})}
+      </div>
+      <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
+        <div className="flex items-center justify-between mb-1"><span className="text-sm font-semibold">Total (incl. city rates)</span><span className="text-lg font-bold tech-num text-primary">₹{(total / 100000).toFixed(2)}L</span></div>
+        <p className="text-[10px] text-muted-foreground">{cityMultipliers[city]?.name} multiplier: {mult}×</p>
+      </div>
+    </div>
+  );
+}
+
+function CalcIcon({ className }: { className?: string }) {
+  return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}><rect x="4" y="2" width="16" height="20" rx="2" /><line x1="8" y1="6" x2="16" y2="6" /><circle cx="8" cy="11" r="0.5" fill="currentColor" /><circle cx="12" cy="11" r="0.5" fill="currentColor" /><circle cx="16" cy="11" r="0.5" fill="currentColor" /><circle cx="8" cy="15" r="0.5" fill="currentColor" /><circle cx="12" cy="15" r="0.5" fill="currentColor" /><circle cx="16" cy="15" r="0.5" fill="currentColor" /><circle cx="8" cy="19" r="0.5" fill="currentColor" /><circle cx="12" cy="19" r="0.5" fill="currentColor" /><circle cx="16" cy="19" r="0.5" fill="currentColor" /></svg>);
+}

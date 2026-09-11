@@ -114,6 +114,8 @@ const RIGHT_TABS = [
   { id: 'versions', icon: History, label: 'Versions' },
   { id: 'sunlight', icon: Sun, label: 'Sun' },
   { id: 'vastu', icon: Shield, label: 'Vastu' },
+  { id: 'walkthrough', icon: Eye, label: 'Walk' },
+  { id: 'matcost', icon: Calculator, label: 'MatCost' },
   { id: 'boq', icon: FileText, label: 'BOQ' },
   { id: 'structural', icon: Building2, label: 'Struct' },
   { id: 'codes', icon: Shield, label: 'Codes' },
@@ -519,6 +521,16 @@ export function Workspace({ config, design, projectId }: Props) {
                   <VastuReport config={{ rooms: layout.rooms as never, plot: layout.plot }} />
                 </FeatureGate>
               )}
+              {rightPanel === 'walkthrough' && (
+                <FeatureGate tier="starter" requiredTier="pro" featureName="3D Walkthrough Mode">
+                  <WalkthroughMode layout={layout} accentColor={accentColor} />
+                </FeatureGate>
+              )}
+              {rightPanel === 'matcost' && (
+                <FeatureGate tier="starter" requiredTier="pro" featureName="Material Cost Calculator">
+                  <MaterialCostCalculator layout={layout} finish={finish} />
+                </FeatureGate>
+              )}
               {rightPanel === 'boq' && (
                 <FeatureGate tier="starter" requiredTier="studio" featureName="Bill of Quantities (BOQ)">
                   <BOQPanel layout={layout} finish={finish} />
@@ -915,4 +927,4 @@ function VersionsPanel({ versions, onRestore, onSave }: {
 
 // ExportModal is in a separate file
 import { ExportModal } from './export-modal';
-import { SunlightAnalysis, VastuReport, BOQPanel, StructuralAnalysis, CityCodeChecker, FeatureGate, type PlanTier } from '@/components/openblueprint/pro/pro-features';
+import { SunlightAnalysis, VastuReport, BOQPanel, StructuralAnalysis, CityCodeChecker, FeatureGate, WalkthroughMode, MaterialCostCalculator, type PlanTier } from '@/components/openblueprint/pro/pro-features';
