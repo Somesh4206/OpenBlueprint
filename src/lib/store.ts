@@ -72,6 +72,9 @@ interface AppState {
   addFurniture: (type: FurnitureType, x: number, y: number) => void;
   updateFurniture: (id: string, patch: Partial<FurnitureItem>) => void;
   deleteFurniture: (id: string) => void;
+  // Subscription tier
+  tier: 'starter' | 'pro' | 'studio';
+  setTier: (t: 'starter' | 'pro' | 'studio') => void;
   // Undo/Redo
   undo: () => void;
   redo: () => void;
@@ -198,6 +201,7 @@ export const useApp = create<AppState>((set, get) => ({
   exportOpen: false,
   _undoStack: [],
   _redoStack: [],
+  tier: 'studio', // Default to Studio so all features are unlocked
   compareOpen: false,
 
   setCurrentDesign: (d) => set({ currentDesign: d, currentLayout: d.layout }),
@@ -290,6 +294,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
   canUndo: () => get()._undoStack.length > 0,
   canRedo: () => get()._redoStack.length > 0,
+  setTier: (t) => set({ tier: t }),
 }));
 
 // Helper: push current layout to undo stack before a mutation

@@ -160,6 +160,8 @@ export function Workspace({ config, design, projectId }: Props) {
   const setShowAllFloors = useApp((s) => s.setShowAllFloors);
   const accentColor = useApp((s) => s.accentColor);
   const setAccentColor = useApp((s) => s.setAccentColor);
+  const tier = useApp((s) => s.tier);
+  const setTier = useApp((s) => s.setTier);
   const materials = useApp((s) => s.materials);
   const setMaterials = useApp((s) => s.setMaterials);
   const finish = useApp((s) => s.finish);
@@ -288,6 +290,18 @@ export function Workspace({ config, design, projectId }: Props) {
               <TooltipContent>Redo (Ctrl+Y)</TooltipContent>
             </Tooltip>
           </TooltipProvider>
+          {/* Tier selector */}
+          <div className="flex items-center rounded-md border border-border p-0.5 bg-muted/40">
+            {(['starter', 'pro', 'studio'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTier(t)}
+                className={cn('px-2 py-0.5 rounded text-[10px] font-medium capitalize transition-colors', tier === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+              >
+                {t === 'studio' ? '🏆' : t === 'pro' ? '⭐' : '🆓'} {t}
+              </button>
+            ))}
+          </div>
           <Button variant="outline" size="sm" onClick={saveProject} className="gap-1.5">
             <Save className="size-4" /> <span className="hidden sm:inline">Save</span>
           </Button>
@@ -512,37 +526,37 @@ export function Workspace({ config, design, projectId }: Props) {
               {rightPanel === 'knowledge' && <KnowledgePanel />}
               {rightPanel === 'versions' && <VersionsPanel versions={versions} onRestore={(l) => { setLayout(l); showToast('Version restored'); }} onSave={saveVersion} />}
               {rightPanel === 'sunlight' && (
-                <FeatureGate tier="starter" requiredTier="pro" featureName="Sunlight & Shadow Analysis">
+                <FeatureGate tier={tier} requiredTier="pro" featureName="Sunlight & Shadow Analysis">
                   <SunlightAnalysis layout={layout} accentColor={accentColor} />
                 </FeatureGate>
               )}
               {rightPanel === 'vastu' && (
-                <FeatureGate tier="starter" requiredTier="pro" featureName="Vastu Compliance Report">
+                <FeatureGate tier={tier} requiredTier="pro" featureName="Vastu Compliance Report">
                   <VastuReport config={{ rooms: layout.rooms as never, plot: layout.plot }} />
                 </FeatureGate>
               )}
               {rightPanel === 'walkthrough' && (
-                <FeatureGate tier="starter" requiredTier="pro" featureName="3D Walkthrough Mode">
+                <FeatureGate tier={tier} requiredTier="pro" featureName="3D Walkthrough Mode">
                   <WalkthroughMode layout={layout} accentColor={accentColor} />
                 </FeatureGate>
               )}
               {rightPanel === 'matcost' && (
-                <FeatureGate tier="starter" requiredTier="pro" featureName="Material Cost Calculator">
+                <FeatureGate tier={tier} requiredTier="pro" featureName="Material Cost Calculator">
                   <MaterialCostCalculator layout={layout} finish={finish} />
                 </FeatureGate>
               )}
               {rightPanel === 'boq' && (
-                <FeatureGate tier="starter" requiredTier="studio" featureName="Bill of Quantities (BOQ)">
+                <FeatureGate tier={tier} requiredTier="studio" featureName="Bill of Quantities (BOQ)">
                   <BOQPanel layout={layout} finish={finish} />
                 </FeatureGate>
               )}
               {rightPanel === 'structural' && (
-                <FeatureGate tier="starter" requiredTier="studio" featureName="Structural Analysis">
+                <FeatureGate tier={tier} requiredTier="studio" featureName="Structural Analysis">
                   <StructuralAnalysis layout={layout} />
                 </FeatureGate>
               )}
               {rightPanel === 'codes' && (
-                <FeatureGate tier="starter" requiredTier="studio" featureName="City Code Checker">
+                <FeatureGate tier={tier} requiredTier="studio" featureName="City Code Checker">
                   <CityCodeChecker plot={layout.plot} floors={layout.floors} />
                 </FeatureGate>
               )}
