@@ -1,8 +1,9 @@
 render:
-  - build: bun install && bun run db:push && bun run build
-    start: bun run start
+  - build: npm install && npx prisma generate && npx prisma db push --accept-data-loss && npm run build
+    start: node .next/standalone/server.js
     env:
       - DATABASE_URL=file:./db/custom.db
+      - NODE_ENV=production
     healthCheck:
       path: /
-      timeout: 30
+      timeout: 60
