@@ -1,9 +1,0 @@
-render:
-  - build: npm install --legacy-peer-deps && npx prisma generate && npx prisma db push --accept-data-loss && npm run build
-    start: node .next/standalone/server.js
-    env:
-      - DATABASE_URL=file:./db/custom.db
-      - NODE_ENV=production
-    healthCheck:
-      path: /
-      timeout: 60
