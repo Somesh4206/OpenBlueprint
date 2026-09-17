@@ -1,0 +1,8 @@
+render:
+  - build: bun install && bun run db:push && bun run build
+    start: bun run start
+    env:
+      - DATABASE_URL=file:./db/custom.db
+    healthCheck:
+      path: /
+      timeout: 30
