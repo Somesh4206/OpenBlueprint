@@ -311,7 +311,7 @@ export function Workspace({ config, design, projectId }: Props) {
           {/* 2D / 3D switch */}
           <div className="flex items-center rounded-md border border-border p-0.5 bg-muted/40">
             <button
-              onClick={() => setView2d(true)}
+              onClick={() => { setView2d(true); setShowAllFloors(false); setSelectedRoom(null); setSelectedFurniture(null); }}
               className={cn('px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors', view2d ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground')}
             >
               <Square className="size-3.5" /> 2D
@@ -396,7 +396,7 @@ export function Workspace({ config, design, projectId }: Props) {
                   <ToggleChip active={showFurniture2d} onClick={() => setShowFurniture2d(!showFurniture2d)} icon={Sofa} label="Furniture" />
                   <Separator orientation="vertical" className="h-5" />
                   <span className="text-xs text-muted-foreground hidden sm:inline">Floor:</span>
-                  <FloorSelector floors={layout.floors} current={currentFloor} onChange={setCurrentFloor} showAll={showAllFloors} onShowAll={setShowAllFloors} />
+                  <FloorSelector floors={layout.floors} current={currentFloor} onChange={(f) => { setCurrentFloor(f); setSelectedRoom(null); setSelectedFurniture(null); }} showAll={false} onShowAll={() => {}} allowAll={false} />
                 </>
               ) : (
                 <>
@@ -404,6 +404,9 @@ export function Workspace({ config, design, projectId }: Props) {
                   {(['orbit', 'isometric', 'front', 'top'] as const).map((v) => (
                     <button key={v} onClick={() => setCameraView(v)} className={cn('text-xs px-2 py-1 rounded capitalize', cameraView === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{v}</button>
                   ))}
+                  <Separator orientation="vertical" className="h-5" />
+                  <span className="text-xs text-muted-foreground hidden sm:inline">Floor:</span>
+                  <FloorSelector floors={layout.floors} current={currentFloor} onChange={setCurrentFloor} showAll={showAllFloors} onShowAll={setShowAllFloors} allowAll />
                   <Separator orientation="vertical" className="h-5" />
                   <ToggleChip active={showWalls3d} onClick={() => setShowWalls3d(!showWalls3d)} icon={Box} label="Walls" />
                   <ToggleChip active={showFurniture3d} onClick={() => setShowFurniture3d(!showFurniture3d)} icon={Sofa} label="Furniture" />
@@ -502,7 +505,7 @@ export function Workspace({ config, design, projectId }: Props) {
         <aside className="w-80 lg:w-96 border-l border-border bg-card flex flex-col shrink-0 overflow-hidden">
           {/* AI Assistant (always at top) */}
           {aiPanelOpen && (
-            <AiAssistant layout={layout} config={config} onApplyLayout={(l) => { setLayout(l); showToast('AI changes applied'); }} />
+            <AiAssistant layout={layout} config={config} currentFloor={currentFloor} onApplyLayout={(l) => { setLayout(l); showToast('AI changes applied'); }} />
           )}
           {/* Right tabs */}
           <div className="border-t border-border flex items-center gap-0.5 px-1 h-11 shrink-0 overflow-x-auto scroll-thin">
@@ -589,7 +592,7 @@ function ToggleChip({ active, onClick, icon: Icon, label }: { active: boolean; o
   );
 }
 
-function FloorSelector({ floors, current, onChange, showAll, onShowAll }: { floors: number; current: number; onChange: (f: number) => void; showAll: boolean; onShowAll: (b: boolean) => void }) {
+function FloorSelector({ floors, current, onChange, showAll, onShowAll, allowAll = true }: { floors: number; current: number; onChange: (f: number) => void; showAll: boolean; onShowAll: (b: boolean) => void; allowAll?: boolean }) {
   const labels = ['Ground', 'First', 'Second', 'Third'];
   return (
     <div className="flex items-center gap-1">
@@ -598,9 +601,14 @@ function FloorSelector({ floors, current, onChange, showAll, onShowAll }: { floo
           {labels[i]}
         </button>
       ))}
-      <button onClick={() => onShowAll(!showAll)} className={cn('text-xs px-2 py-1 rounded flex items-center gap-1', showAll ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
-        {showAll ? <EyeOff className="size-3" /> : <Eye className="size-3" />} All
-      </button>
+      {/* "All" stacks every floor at the same coordinates — meaningful only in
+          3D (vertical stacking). In 2D it superimposes plans into one
+          unreadable collision, so it is hidden there. */}
+      {allowAll && (
+        <button onClick={() => onShowAll(!showAll)} className={cn('text-xs px-2 py-1 rounded flex items-center gap-1', showAll ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
+          {showAll ? <EyeOff className="size-3" /> : <Eye className="size-3" />} All
+        </button>
+      )}
     </div>
   );
 }
@@ -863,7 +871,8 @@ function KnowledgePanel() {
     setLoading(true);
     setAnswer(null);
     try {
-      const res = await fetch('/api/ai/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: query }) });
+      const { aiHeaders } = await import('@/lib/ai/client');
+      const res = await fetch('/api/ai/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json', ...aiHeaders() }, body: JSON.stringify({ question: query }) });
       const data = await res.json();
       setAnswer(data.answer);
       setSources(data.sources || []);

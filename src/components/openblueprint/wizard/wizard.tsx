@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState } from 'react';
 import { useApp } from '@/lib/store';
 import { Brand } from '@/components/openblueprint/brand';
 import { MiniPlan } from '@/components/openblueprint/mini-plan';
@@ -27,8 +27,6 @@ import {
   ChevronUp,
   ChevronDown,
   Compass,
-  CheckCircle2,
-  Loader2,
   AlertTriangle,
   Home,
   CheckCheck,
@@ -46,29 +44,25 @@ const STEPS = [
 ];
 
 const PREFERENCES: { key: PreferenceKey; label: string; desc: string }[] = [
-  { key: 'kitchen-near-dining', label: 'Kitchen near dining', desc: 'Place kitchen adjacent to dining area' },
-  { key: 'master-attached-bath', label: 'Master bedroom + attached bath', desc: 'En-suite bathroom for master bedroom' },
-  { key: 'parking-near-entrance', label: 'Parking near entrance', desc: 'Parking close to the road-side entry' },
-  { key: 'internal-staircase', label: 'Internal staircase', desc: 'Staircase inside the built area' },
-  { key: 'balcony-bedroom', label: 'Balcony to bedroom', desc: 'Attach balcony to a bedroom' },
-  { key: 'max-natural-light', label: 'Maximum natural light', desc: 'Prioritize outer-wall windows' },
-  { key: 'improved-circulation', label: 'Improved circulation', desc: 'Wider internal circulation paths' },
-  { key: 'open-plan', label: 'Open-plan layout', desc: 'Combine living + dining + kitchen' },
+  { key: 'kitchen-near-dining', label: 'Kitchen next to dining', desc: 'AI joins them wall-to-wall for easy serving' },
+  { key: 'master-attached-bath', label: 'Master bedroom + attached bath', desc: 'AI gives the master bedroom its own en-suite' },
+  { key: 'balcony-bedroom', label: 'Balcony off a bedroom', desc: 'AI attaches the balcony to a bedroom, not the hall' },
+  { key: 'open-plan', label: 'Open-plan living', desc: 'AI clusters living + dining + kitchen as one flowing space' },
+  { key: 'max-natural-light', label: 'Maximum natural light', desc: 'AI pushes bedrooms & living to outer walls with windows' },
 ];
 
 const STYLES: { value: DesignStyle; label: string; desc: string }[] = [
-  { value: 'modern', label: 'Modern', desc: 'Clean lines, flat forms' },
-  { value: 'minimal', label: 'Minimal', desc: 'Reduction, simplicity' },
-  { value: 'traditional', label: 'Traditional', desc: 'Warm, classic forms' },
-  { value: 'contemporary', label: 'Contemporary', desc: 'Current, mixed materials' },
-  { value: 'luxury', label: 'Luxury', desc: 'Premium finishes, space' },
+  { value: 'modern', label: 'Modern', desc: 'Clean lines, flat roof, open feel' },
+  { value: 'minimal', label: 'Minimal', desc: 'Less is more — calm & compact' },
+  { value: 'traditional', label: 'Traditional', desc: 'Warm pitched roof, classic charm' },
+  { value: 'contemporary', label: 'Contemporary', desc: 'Bold overhangs, mixed materials' },
+  { value: 'luxury', label: 'Luxury', desc: 'Grand volumes, premium finishes' },
 ];
 
 export function Wizard() {
   const setView = useApp((s) => s.setView);
   const wizardConfig = useApp((s) => s.wizardConfig);
   const setWizardConfig = useApp((s) => s.setWizardConfig);
-  const setDesigns = useApp((s) => s.setDesigns);
   const [step, setStep] = useState(0);
   const [showFloorDialog, setShowFloorDialog] = useState(false);
 
@@ -90,24 +84,21 @@ export function Wizard() {
     }
   }
 
-  async function doGenerate() {
+  function doGenerate(assignment?: Record<string, number[]>) {
     setShowFloorDialog(false);
+    // IMPORTANT: build the config from the passed assignment directly.
+    // The old code relied on setWizardConfig + setTimeout, but the closure
+    // held the STALE config — floorAssignment never reached the API, so the
+    // user's floor choices were silently ignored. This was the reported bug.
+    if (assignment) setWizardConfig({ floorAssignment: assignment });
+    const config = assignment ? { ...wizardConfig, floorAssignment: assignment } : wizardConfig;
+    // The design-options screen performs the real AI-first fetch (with key,
+    // clarification, and error states). Just navigate — it handles the rest.
     setView({
       name: 'design-options',
-      config: wizardConfig,
+      config,
       designs: [],
     });
-    try {
-      const res = await fetch('/api/layout/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(wizardConfig),
-      });
-      const data = await res.json();
-      setDesigns(data.designs || []);
-    } catch {
-      // fallback handled by design-options using client engine import
-    }
   }
 
   return (
@@ -136,7 +127,18 @@ export function Wizard() {
               </div>
             ))}
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setView({ name: 'landing' })}>Cancel</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setView({ name: 'landing' })}>Cancel</Button>
+            {step < 3 ? (
+              <Button size="sm" onClick={next} className="gap-1.5">
+                Continue <ArrowRight className="size-3.5" />
+              </Button>
+            ) : (
+              <Button size="sm" onClick={generate} className="gap-1.5">
+                <Sparkles className="size-3.5" /> Generate
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -159,8 +161,8 @@ export function Wizard() {
         </AnimatePresence>
       </main>
 
-      {/* Footer nav */}
-      <footer className="border-t border-border bg-card">
+      {/* Footer nav — sticky so Continue is always one click away */}
+      <footer className="sticky bottom-0 z-40 border-t border-border bg-card/90 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <Button variant="ghost" onClick={back} className="gap-1.5">
             <ArrowLeft className="size-4" /> {step === 0 ? 'Home' : 'Back'}
@@ -181,11 +183,7 @@ export function Wizard() {
       {showFloorDialog && (
         <FloorDistributionDialog
           config={wizardConfig}
-          onConfirm={(floorAssignment) => {
-            setWizardConfig({ floorAssignment });
-            // need to call doGenerate after state updates
-            setTimeout(() => doGenerate(), 100);
-          }}
+          onConfirm={(floorAssignment) => doGenerate(floorAssignment)}
           onCancel={() => setShowFloorDialog(false)}
         />
       )}
@@ -193,36 +191,73 @@ export function Wizard() {
   );
 }
 
+const PLOT_PRESETS = [
+  { label: '20 × 30', w: 20, l: 30, hint: 'Compact' },
+  { label: '30 × 40', w: 30, l: 40, hint: 'Classic' },
+  { label: '30 × 50', w: 30, l: 50, hint: 'Popular' },
+  { label: '40 × 60', w: 40, l: 60, hint: 'Spacious' },
+];
+
 // ---------------- STEP 1: Plot Details ----------------
 function PlotStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c: Partial<ProjectConfig>) => void }) {
   const { plot, floors } = config;
+  const plotArea = plot.width * plot.length;
+  const buildableW = Math.max(0, plot.width - plot.setbackSides * 2);
+  const buildableL = Math.max(0, plot.length - plot.setbackFront - plot.setbackRear);
+  const buildablePct = plotArea > 0 ? Math.round((buildableW * buildableL / plotArea) * 100) : 0;
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="grid lg:grid-cols-2 gap-8">
       <div>
-        <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: 'var(--font-display)' }}>01 — Enter Measurements</h2>
-        <p className="text-muted-foreground mb-6 text-sm">Define your plot dimensions and orientation. The plot preview updates live.</p>
+        <Badge variant="secondary" className="mb-2 tech-num text-[10px]">STEP 01 / 04</Badge>
+        <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: 'var(--font-display)' }}>Your land, exactly as it is</h2>
+        <p className="text-muted-foreground mb-5 text-sm">Enter the plot size from your sale deed or site measurement. The AI plans only inside the buildable area — everything updates live on the right.</p>
+
+        {/* Common sizes */}
+        <Label className="text-xs text-muted-foreground">Common plot sizes — tap to fill</Label>
+        <div className="grid grid-cols-4 gap-2 mt-1.5 mb-5">
+          {PLOT_PRESETS.map((p) => {
+            const active = plot.width === p.w && plot.length === p.l;
+            return (
+              <button
+                key={p.label}
+                onClick={() => setConfig({ plot: { ...plot, width: p.w, length: p.l } })}
+                className={cn(
+                  'rounded-lg border px-2 py-2 text-center transition-all hover:-translate-y-0.5',
+                  active ? 'border-primary bg-primary/5 ring-1 ring-primary/30' : 'border-border hover:border-cyan/50'
+                )}
+              >
+                <p className="text-sm font-semibold tech-num">{p.label}</p>
+                <p className="text-[10px] text-muted-foreground">{p.hint}</p>
+              </button>
+            );
+          })}
+        </div>
 
         <div className="grid grid-cols-2 gap-4 mb-5">
           <div>
-            <Label className="text-xs text-muted-foreground">Plot Width</Label>
-            <div className="relative">
+            <Label className="text-xs text-muted-foreground">Plot Width <span className="opacity-60">({plot.unit})</span></Label>
+            <div className="relative mt-1">
+              <Ruler className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <Input
                 type="number"
+                min={10}
                 value={plot.width}
-                onChange={(e) => setConfig({ plot: { ...plot, width: Number(e.target.value) } })}
-                className="tech-num pr-10"
+                onChange={(e) => setConfig({ plot: { ...plot, width: Math.max(0, Number(e.target.value)) } })}
+                className="tech-num pl-8 pr-10 h-10 text-base font-medium"
               />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{plot.unit}</span>
             </div>
           </div>
           <div>
-            <Label className="text-xs text-muted-foreground">Plot Length</Label>
-            <div className="relative">
+            <Label className="text-xs text-muted-foreground">Plot Length <span className="opacity-60">({plot.unit})</span></Label>
+            <div className="relative mt-1">
+              <Ruler className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <Input
                 type="number"
+                min={10}
                 value={plot.length}
-                onChange={(e) => setConfig({ plot: { ...plot, length: Number(e.target.value) } })}
-                className="tech-num pr-10"
+                onChange={(e) => setConfig({ plot: { ...plot, length: Math.max(0, Number(e.target.value)) } })}
+                className="tech-num pl-8 pr-10 h-10 text-base font-medium"
               />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{plot.unit}</span>
             </div>
@@ -230,46 +265,64 @@ function PlotStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c:
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-5">
+          <div>
+            <Label className="text-xs text-muted-foreground">How many floors?</Label>
+            <div className="grid grid-cols-3 gap-1.5 mt-1.5 p-1 rounded-lg bg-muted/60">
+              {[1, 2, 3].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setConfig({ floors: f })}
+                  className={cn(
+                    'rounded-md py-1.5 text-sm font-semibold tech-num transition-all',
+                    floors === f ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {f === 1 ? 'Single' : f === 2 ? 'Duplex' : 'Triplex'}
+                  <span className="block text-[10px] font-normal opacity-70">{f} floor{f > 1 ? 's' : ''}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <Label className="text-xs text-muted-foreground">Measurement Unit</Label>
-            <Select value={plot.unit} onValueChange={(v) => setConfig({ plot: { ...plot, unit: v as 'ft' | 'm' } })}>
-              <SelectTrigger className="tech-num"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ft">Feet (ft)</SelectItem>
-                <SelectItem value="m">Meters (m)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs text-muted-foreground">Number of Floors</Label>
-            <Select value={String(floors)} onValueChange={(v) => setConfig({ floors: Number(v) })}>
-              <SelectTrigger className="tech-num"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">1 Floor</SelectItem>
-                <SelectItem value="2">2 Floors</SelectItem>
-                <SelectItem value="3">3 Floors</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="grid grid-cols-2 gap-1.5 mt-1.5 p-1 rounded-lg bg-muted/60">
+              {(['ft', 'm'] as const).map((u) => (
+                <button
+                  key={u}
+                  onClick={() => setConfig({ plot: { ...plot, unit: u } })}
+                  className={cn(
+                    'rounded-md py-2.5 text-sm font-semibold tech-num transition-all',
+                    plot.unit === u ? 'bg-background shadow text-primary' : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {u === 'ft' ? 'Feet' : 'Meters'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-5">
           <div>
-            <Label className="text-xs text-muted-foreground">Road Side</Label>
-            <Select value={plot.roadSide} onValueChange={(v) => setConfig({ plot: { ...plot, roadSide: v as 'north' | 'south' | 'east' | 'west' } })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="north">North</SelectItem>
-                <SelectItem value="south">South</SelectItem>
-                <SelectItem value="east">East</SelectItem>
-                <SelectItem value="west">West</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label className="text-xs text-muted-foreground">Which side is the road on?</Label>
+            <p className="text-[11px] text-muted-foreground mb-1.5">Entry, parking & living face this side.</p>
+            <div className="grid grid-cols-3 gap-1 w-fit">
+              <div />
+              <RoadBtn side="north" current={plot.roadSide} set={(s) => setConfig({ plot: { ...plot, roadSide: s } })} label="N" />
+              <div />
+              <RoadBtn side="west" current={plot.roadSide} set={(s) => setConfig({ plot: { ...plot, roadSide: s } })} label="W" />
+              <div className="size-9 rounded-md bg-muted/60 flex items-center justify-center"><Compass className="size-4 text-cyan" /></div>
+              <RoadBtn side="east" current={plot.roadSide} set={(s) => setConfig({ plot: { ...plot, roadSide: s } })} label="E" />
+              <div />
+              <RoadBtn side="south" current={plot.roadSide} set={(s) => setConfig({ plot: { ...plot, roadSide: s } })} label="S" />
+              <div />
+            </div>
           </div>
           <div>
             <Label className="text-xs text-muted-foreground">North Direction</Label>
+            <p className="text-[11px] text-muted-foreground mb-1.5">For sunlight & Vastu orientation.</p>
             <Select value={String(plot.northDirection)} onValueChange={(v) => setConfig({ plot: { ...plot, northDirection: Number(v) } })}>
-              <SelectTrigger className="tech-num"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="tech-num mt-0.5"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="0">Up (0°)</SelectItem>
                 <SelectItem value="90">Right (90°)</SelectItem>
@@ -280,22 +333,35 @@ function PlotStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c:
           </div>
         </div>
 
-        <div className="space-y-3">
-          <Label className="text-xs text-muted-foreground">Setback Preferences (ft)</Label>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <span className="text-[10px] text-muted-foreground">Front</span>
-              <Input type="number" value={plot.setbackFront} onChange={(e) => setConfig({ plot: { ...plot, setbackFront: Number(e.target.value) } })} className="tech-num h-9" />
-            </div>
-            <div>
-              <span className="text-[10px] text-muted-foreground">Rear</span>
-              <Input type="number" value={plot.setbackRear} onChange={(e) => setConfig({ plot: { ...plot, setbackRear: Number(e.target.value) } })} className="tech-num h-9" />
-            </div>
-            <div>
-              <span className="text-[10px] text-muted-foreground">Sides</span>
-              <Input type="number" value={plot.setbackSides} onChange={(e) => setConfig({ plot: { ...plot, setbackSides: Number(e.target.value) } })} className="tech-num h-9" />
-            </div>
+        <div className="rounded-lg border border-border/70 p-3.5 bg-muted/20">
+          <div className="flex items-center justify-between mb-1">
+            <Label className="text-xs">Open margins around the house <span className="text-muted-foreground">({plot.unit})</span></Label>
+            <Badge variant="secondary" className="tech-num text-[10px]">{buildablePct}% buildable</Badge>
           </div>
+          <p className="text-[11px] text-muted-foreground mb-2.5">Mandatory open space for light, ventilation & bylaws. The dashed area in the preview.</p>
+          <div className="grid grid-cols-3 gap-3">
+            {([
+              { k: 'setbackFront', label: 'Front (road side)' },
+              { k: 'setbackRear', label: 'Rear' },
+              { k: 'setbackSides', label: 'Each side' },
+            ] as const).map((s) => (
+              <div key={s.k}>
+                <span className="text-[10px] text-muted-foreground">{s.label}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  value={plot[s.k]}
+                  onChange={(e) => setConfig({ plot: { ...plot, [s.k]: Math.max(0, Number(e.target.value)) } })}
+                  className="tech-num h-9 mt-0.5"
+                />
+              </div>
+            ))}
+          </div>
+          {buildablePct <= 0 && (
+            <p className="text-xs text-red-600 dark:text-red-400 mt-2 flex items-center gap-1.5">
+              <AlertTriangle className="size-3.5" /> Margins eat the full plot — reduce them to leave buildable area.
+            </p>
+          )}
         </div>
       </div>
 
@@ -334,6 +400,29 @@ function PlotStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c:
         </Card>
       </div>
     </motion.div>
+  );
+}
+
+function RoadBtn({ side, current, set, label }: {
+  side: 'north' | 'south' | 'east' | 'west';
+  current: string;
+  set: (s: 'north' | 'south' | 'east' | 'west') => void;
+  label: string;
+}) {
+  const active = current === side;
+  return (
+    <button
+      onClick={() => set(side)}
+      title={`Road on ${side}`}
+      className={cn(
+        'size-9 rounded-md text-xs font-bold tech-num transition-all border',
+        active
+          ? 'bg-primary text-primary-foreground border-primary shadow'
+          : 'bg-background border-border text-muted-foreground hover:border-cyan/50 hover:text-foreground'
+      )}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -432,18 +521,70 @@ function RoomsStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c
     }
   }
 
+  function applyPreset(preset: RoomType[]) {
+    const counts = new Map<RoomType, number>();
+    for (const t of preset) counts.set(t, (counts.get(t) || 0) + 1);
+    const next: RoomRequirement[] = [];
+    for (const [type, count] of counts) {
+      const cat = ROOM_CATALOG[type];
+      const prev = rooms.find((r) => r.type === type);
+      next.push({
+        type,
+        name: cat.defaultName,
+        count,
+        minWidth: prev?.minWidth ?? cat.minWidth,
+        minLength: prev?.minLength ?? cat.minLength,
+        preferredWidth: prev?.preferredWidth ?? cat.preferredWidth,
+        preferredLength: prev?.preferredLength ?? cat.preferredLength,
+        priority: prev?.priority ?? 'medium',
+        attachedTo: null,
+        preferredLocation: prev?.preferredLocation ?? null,
+      });
+    }
+    setConfig({ rooms: next });
+  }
+
+  const BHK_PRESETS: { label: string; hint: string; rooms: RoomType[] }[] = [
+    { label: '1 BHK', hint: 'Compact', rooms: ['bedroom', 'bathroom', 'kitchen', 'living'] },
+    { label: '2 BHK', hint: 'Family', rooms: ['bedroom', 'bedroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining', 'balcony'] },
+    { label: '3 BHK', hint: 'Popular', rooms: ['bedroom', 'bedroom', 'bedroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining', 'parking', 'balcony', 'pooja'] },
+    { label: '4 BHK', hint: 'Large', rooms: ['bedroom', 'bedroom', 'bedroom', 'bedroom', 'bathroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining', 'parking', 'balcony', 'pooja', 'office'] },
+  ];
+
   const grouped = {
     private: ALL_ROOM_TYPES.filter((t) => ROOM_CATALOG[t].group === 'private'),
     public: ALL_ROOM_TYPES.filter((t) => ROOM_CATALOG[t].group === 'public'),
     service: ALL_ROOM_TYPES.filter((t) => ROOM_CATALOG[t].group === 'service'),
     circulation: ALL_ROOM_TYPES.filter((t) => ROOM_CATALOG[t].group === 'circulation'),
   };
-  const groupLabels = { private: 'Private', public: 'Public', service: 'Service', circulation: 'Circulation' };
+  const groupLabels = {
+    private: 'Private — quiet rear of the house',
+    public: 'Public — welcoming front near the road',
+    service: 'Service — utility edge, away from bedrooms',
+    circulation: 'Circulation — movement & entry',
+  };
+  const totalRooms = rooms.reduce((s, r) => s + r.count, 0);
 
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-      <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: 'var(--font-display)' }}>02 — Define Requirements</h2>
-      <p className="text-muted-foreground mb-6 text-sm">Select rooms and set counts, sizes, and priorities. Adding a room triggers a layout regeneration later.</p>
+      <Badge variant="secondary" className="mb-2 tech-num text-[10px]">STEP 02 / 04</Badge>
+      <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: 'var(--font-display)' }}>What should your home hold?</h2>
+      <p className="text-muted-foreground mb-5 text-sm">Start from a preset or build your own — every room you pick is placed by the AI, with correct sizes and adjacencies.</p>
+
+      {/* BHK presets */}
+      <Label className="text-xs text-muted-foreground">Start from a home type — tap to fill</Label>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1.5 mb-6">
+        {BHK_PRESETS.map((p) => (
+          <button
+            key={p.label}
+            onClick={() => applyPreset(p.rooms)}
+            className="rounded-lg border border-border px-3 py-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-cyan/50 hover:shadow-sm"
+          >
+            <p className="text-sm font-bold">{p.label}</p>
+            <p className="text-[11px] text-muted-foreground">{p.hint} · {p.rooms.length} spaces</p>
+          </button>
+        ))}
+      </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Room picker */}
@@ -457,20 +598,30 @@ function RoomsStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c
                   const req = rooms.find((r) => r.type === type);
                   const count = req?.count || 0;
                   return (
-                    <Card key={type} className={cn('p-3 transition-all cursor-pointer', count > 0 ? 'border-primary ring-1 ring-primary/20' : 'hover:border-cyan/40')} onClick={() => count === 0 && addRoom(type)}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">{cat.label}</span>
+                    <Card
+                      key={type}
+                      className={cn(
+                        'p-3 transition-all cursor-pointer hover:-translate-y-0.5',
+                        count > 0 ? 'border-primary ring-1 ring-primary/25 bg-primary/[0.03]' : 'hover:border-cyan/40 hover:shadow-sm'
+                      )}
+                      onClick={() => count === 0 && addRoom(type)}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-sm font-medium flex items-center gap-1.5 min-w-0">
+                          <span className="size-2 rounded-full shrink-0" style={{ background: cat.accent }} />
+                          <span className="truncate">{cat.label}</span>
+                        </span>
                         {count > 0 ? (
-                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                             <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => removeRoom(type)}><Minus className="size-3" /></Button>
-                            <span className="tech-num text-sm font-semibold w-5 text-center">{count}</span>
+                            <span className="tech-num text-sm font-bold w-5 text-center text-primary">{count}</span>
                             <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => addRoom(type)}><Plus className="size-3" /></Button>
                           </div>
                         ) : (
-                          <Plus className="size-4 text-muted-foreground" />
+                          <Plus className="size-4 text-muted-foreground shrink-0" />
                         )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-1 tech-num">min {cat.minWidth}×{cat.minLength} {config.plot.unit}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1.5 tech-num">ideal {cat.preferredWidth}×{cat.preferredLength} {config.plot.unit}</p>
                     </Card>
                   );
                 })}
@@ -480,11 +631,16 @@ function RoomsStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c
         </div>
 
         {/* Selected rooms detail */}
-        <Card className="p-4 lg:sticky lg:top-24 flex flex-col" style={{ maxHeight: '70vh' }}>
-          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><LayoutGrid className="size-4 text-cyan" /> Configured Rooms ({rooms.reduce((s, r) => s + r.count, 0)})</h3>
+        <Card className="p-4 lg:sticky lg:top-24 flex flex-col border-cyan/20" style={{ maxHeight: '70vh' }}>
+          <h3 className="text-sm font-semibold mb-1 flex items-center gap-2"><LayoutGrid className="size-4 text-cyan" /> Your list ({totalRooms})</h3>
+          <p className="text-[11px] text-muted-foreground mb-3">Fine-tune sizes & priorities — the AI honours these.</p>
           <div className="flex-1 overflow-y-auto scroll-thin -mx-2 px-2 min-h-0">
             {rooms.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-6 text-center">No rooms selected yet. Tap a room card to add it.</p>
+              <div className="py-8 text-center">
+                <LayoutGrid className="size-8 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-sm font-medium">Nothing here yet</p>
+                <p className="text-xs text-muted-foreground mt-1">Pick a home type above,<br />or tap any room card to add it.</p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {rooms.map((r) => {
@@ -550,39 +706,79 @@ function PreferencesStep({ config, setConfig }: { config: ProjectConfig; setConf
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="grid lg:grid-cols-2 gap-8">
       <div>
-        <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: 'var(--font-display)' }}>03 — Preferences</h2>
-        <p className="text-muted-foreground mb-6 text-sm">Tune design style and spatial preferences. These guide the layout engine.</p>
+        <Badge variant="secondary" className="mb-2 tech-num text-[10px]">STEP 03 / 04</Badge>
+        <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: 'var(--font-display)' }}>How should it feel?</h2>
+        <p className="text-muted-foreground mb-6 text-sm">Pick a look, then tell the AI what matters to you. Each switch below becomes a hard instruction in the AI&apos;s plan — not a hint.</p>
 
         {/* Style */}
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Architecture Style</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Look & feel <span className="normal-case font-normal opacity-70">— sets the 3D style too</span></h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-6">
-          {STYLES.map((s) => (
-            <button
-              key={s.value}
-              onClick={() => setConfig({ style: s.value })}
-              className={cn(
-                'text-left p-3 rounded-md border transition-all',
-                config.style === s.value ? 'border-primary ring-1 ring-primary/20 bg-primary/5' : 'border-border hover:border-cyan/40'
-              )}
-            >
-              <span className="text-sm font-medium">{s.label}</span>
-              <p className="text-xs text-muted-foreground">{s.desc}</p>
-            </button>
-          ))}
+          {STYLES.map((s) => {
+            const selected = config.style === s.value;
+            return (
+              <button
+                key={s.value}
+                onClick={() => setConfig({ style: s.value })}
+                className={cn(
+                  'text-left p-3 rounded-lg border transition-all hover:-translate-y-0.5 flex items-start justify-between gap-2',
+                  selected ? 'border-primary ring-1 ring-primary/25 bg-primary/[0.04] shadow-sm' : 'border-border hover:border-cyan/40'
+                )}
+              >
+                <span>
+                  <span className="text-sm font-semibold">{s.label}</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">{s.desc}</p>
+                </span>
+                <span className={cn(
+                  'size-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all',
+                  selected ? 'bg-primary border-primary text-primary-foreground' : 'border-border text-transparent'
+                )}>
+                  <Check className="size-3" />
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Preferences */}
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Spatial Preferences</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">What matters to you</h3>
+          <Badge variant="secondary" className="tech-num text-[10px]">
+            {config.preferences.length} on
+          </Badge>
+        </div>
         <div className="space-y-2">
           {PREFERENCES.map((p) => {
             const active = config.preferences.includes(p.key);
             return (
-              <div key={p.key} className={cn('flex items-center justify-between p-3 rounded-md border transition-all', active ? 'border-primary/30 bg-primary/5' : 'border-border')}>
-                <div>
-                  <p className="text-sm font-medium">{p.label}</p>
-                  <p className="text-xs text-muted-foreground">{p.desc}</p>
+              <div
+                key={p.key}
+                role="button"
+                tabIndex={0}
+                onClick={() => togglePref(p.key)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    togglePref(p.key);
+                  }
+                }}
+                className={cn(
+                  'w-full flex items-center justify-between gap-3 p-3 rounded-lg border transition-all text-left cursor-pointer hover:-translate-y-px',
+                  active ? 'border-primary/40 bg-primary/[0.04] shadow-sm' : 'border-border hover:border-cyan/40'
+                )}
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className={cn(
+                    'size-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 transition-all',
+                    active ? 'bg-primary border-primary text-primary-foreground' : 'border-border text-transparent'
+                  )}>
+                    <Check className="size-3" />
+                  </span>
+                  <span>
+                    <p className="text-sm font-medium leading-tight">{p.label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{p.desc}</p>
+                  </span>
                 </div>
-                <Switch checked={active} onCheckedChange={() => togglePref(p.key)} />
+                <Switch checked={active} onCheckedChange={() => togglePref(p.key)} onClick={(e) => e.stopPropagation()} />
               </div>
             );
           })}
@@ -593,11 +789,11 @@ function PreferencesStep({ config, setConfig }: { config: ProjectConfig; setConf
       <div>
         <Card className="p-5 mb-5">
           <div className="flex items-center justify-between mb-1">
-            <h3 className="font-semibold flex items-center gap-2"><Compass className="size-4 text-cyan" /> Optional Vastu Preferences</h3>
+            <h3 className="font-semibold flex items-center gap-2"><Compass className="size-4 text-cyan" /> Vastu <Badge variant="outline" className="text-[10px] font-normal">optional</Badge></h3>
             <Switch checked={config.vastuEnabled} onCheckedChange={(b) => setConfig({ vastuEnabled: b })} />
           </div>
           <p className="text-xs text-muted-foreground mb-4">
-            Cultural / traditional design preferences (not structural or engineering requirements). Always prioritize structural safety and local codes.
+            Traditional directional guidance for entrance, kitchen, bedroom & pooja. The AI follows it without breaking structural rules — safety and building codes always come first.
           </p>
           <div className={cn('space-y-3 transition-opacity', !config.vastuEnabled && 'opacity-40 pointer-events-none')}>
             <div className="grid grid-cols-2 gap-3">
@@ -655,9 +851,9 @@ function PreferencesStep({ config, setConfig }: { config: ProjectConfig; setConf
           <div className="flex gap-3">
             <AlertTriangle className="size-5 text-amber-soft shrink-0" />
             <div>
-              <h4 className="text-sm font-semibold mb-1">Good to know</h4>
+              <h4 className="text-sm font-semibold mb-1">What happens next?</h4>
               <p className="text-xs text-muted-foreground">
-                Preferences guide the layout engine but are not guaranteed. Generated plans are preliminary conceptual designs — review with a qualified architect before construction.
+                The AI reasons over everything above — plot, rooms, switches, Vastu — then draws 5 plan options. If anything conflicts, it asks you first. Plans are preliminary concepts: get a licensed architect&apos;s sign-off before building.
               </p>
             </div>
           </div>
@@ -668,41 +864,19 @@ function PreferencesStep({ config, setConfig }: { config: ProjectConfig; setConf
 }
 
 // ---------------- STEP 4: Generate ----------------
+// NOTE: this step is review + a single button. The REAL AI run happens once,
+// on the design-options screen (with live progress, doubts and errors).
+// The old fake planning animation here made it look like the AI ran twice.
 function GenerateStep({ config, onGenerate }: { config: ProjectConfig; onGenerate: () => void }) {
-  const [phase, setPhase] = useState<'idle' | 'running' | 'done'>('idle');
-  const [logIndex, setLogIndex] = useState(0);
-
-  const logLines = useMemo(() => [
-    { t: 'Analyzing plot...', ok: `Plot dimensions validated — ${config.plot.width}×${config.plot.length} ${config.plot.unit}` },
-    { t: 'Processing requirements...', ok: `${config.rooms.reduce((s, r) => s + r.count, 0)} rooms across ${config.floors} floor(s)` },
-    { t: 'Applying spatial constraints...', ok: 'Constraints applied' },
-    { t: 'Generating layouts...', ok: '4 candidate layouts generated' },
-    { t: 'Validating layouts...', ok: '4 valid designs found' },
-  ], [config]);
-
-  function start() {
-    setPhase('running');
-    setLogIndex(0);
-  }
-
-  // animate log
-  useEffect(() => {
-    if (phase !== 'running') return;
-    if (logIndex >= logLines.length) {
-      const t = setTimeout(() => {
-        setPhase('done');
-        setTimeout(onGenerate, 600);
-      }, 500);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => setLogIndex((i) => i + 1), 650);
-    return () => clearTimeout(t);
-  }, [phase, logIndex, logLines, onGenerate]);
-
+  const totalRooms = config.rooms.reduce((s, r) => s + r.count, 0);
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="max-w-2xl mx-auto">
-      <h2 className="text-2xl font-bold mb-1 text-center" style={{ fontFamily: 'var(--font-display)' }}>04 — Generate Blueprint</h2>
-      <p className="text-muted-foreground mb-8 text-sm text-center">Review your settings and let the layout engine generate multiple preliminary designs.</p>
+      <Badge variant="secondary" className="mb-2 tech-num text-[10px] mx-auto flex w-fit">STEP 04 / 04</Badge>
+      <h2 className="text-2xl font-bold mb-1 text-center" style={{ fontFamily: 'var(--font-display)' }}>Ready when you are</h2>
+      <p className="text-muted-foreground mb-8 text-sm text-center">
+        Review everything below. One click sends it all to the AI — it reasons about zoning, adjacency and doors, draws 5 plan options, and asks you first if anything conflicts.
+        {config.floors > 1 && ' Since this is multi-floor, you’ll confirm the room-per-floor split first.'}
+      </p>
 
       <Card className="p-6 mb-6">
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><CheckCheck className="size-4 text-cyan" /> Configuration Summary</h3>
@@ -711,7 +885,7 @@ function GenerateStep({ config, onGenerate }: { config: ProjectConfig; onGenerat
           <SummaryItem label="Floors" value={`${config.floors}`} />
           <SummaryItem label="Road Side" value={config.plot.roadSide} />
           <SummaryItem label="Style" value={config.style} />
-          <SummaryItem label="Rooms" value={`${config.rooms.reduce((s, r) => s + r.count, 0)}`} />
+          <SummaryItem label="Rooms" value={`${totalRooms}`} />
           <SummaryItem label="Preferences" value={`${config.preferences.length}`} />
           <SummaryItem label="Vastu" value={config.vastuEnabled ? 'Enabled' : 'Off'} />
           <SummaryItem label="Building Area" value={`${(config.plot.width - config.plot.setbackSides * 2) * (config.plot.length - config.plot.setbackFront - config.plot.setbackRear)} sq.${config.plot.unit}`} />
@@ -723,53 +897,12 @@ function GenerateStep({ config, onGenerate }: { config: ProjectConfig; onGenerat
         </div>
       </Card>
 
-      {phase === 'idle' && (
-        <div className="text-center">
-          <Button size="lg" onClick={start} className="gap-2 w-full sm:w-auto">
-            <Sparkles className="size-4" /> Start AI Planning
-          </Button>
-          <p className="text-xs text-muted-foreground mt-3">Generates 4 design strategies — typically takes a few seconds.</p>
-        </div>
-      )}
-
-      {phase !== 'idle' && (
-        <Card className="p-5 bp-grid-dark text-white">
-          <div className="space-y-2.5 font-mono text-sm">
-            {logLines.map((line, i) => {
-              const reached = logIndex > i;
-              const current = logIndex === i;
-              const done = phase === 'done';
-              return (
-                <div key={i}>
-                  <div className={cn('flex items-center gap-2', !reached && !current && !done && 'opacity-40')}>
-                    {reached || done ? (
-                      <CheckCircle2 className="size-4 text-cyan" />
-                    ) : current ? (
-                      <Loader2 className="size-4 text-cyan animate-spin" />
-                    ) : (
-                      <div className="size-4 rounded-full border border-white/30" />
-                    )}
-                    <span className={cn(reached || done ? 'text-white' : 'text-white/60')}>{line.t}</span>
-                  </div>
-                  {(reached || (done && i < logLines.length)) && (
-                    <motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} className="ml-6 mt-0.5 text-xs text-cyan/90">
-                      ✓ {line.ok}
-                    </motion.div>
-                  )}
-                </div>
-              );
-            })}
-            {phase === 'done' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-3 mt-3 border-t border-white/20">
-                <p className="text-cyan font-semibold flex items-center gap-2">
-                  <CheckCircle2 className="size-5" /> Your Blueprint Options Are Ready
-                </p>
-                <p className="text-white/70 text-xs mt-1">Loading design options…</p>
-              </motion.div>
-            )}
-          </div>
-        </Card>
-      )}
+      <div className="text-center">
+        <Button size="lg" onClick={onGenerate} className="gap-2 w-full sm:w-auto">
+          <Sparkles className="size-4" /> Generate My Blueprints
+        </Button>
+        <p className="text-xs text-muted-foreground mt-3">5 AI-reasoned variants — usually 10–30 seconds.</p>
+      </div>
     </motion.div>
   );
 }
@@ -796,11 +929,12 @@ function FloorDistributionDialog({
   const floors = config.floors;
   const floorLabels = ['Ground Floor', 'First Floor', 'Second Floor', 'Third Floor'];
 
-  // Build the default distribution (same logic as engine)
+  // Build the default distribution (same logic as the engine:
+  // dining ALWAYS stays with the kitchen on the ground — splitting them
+  // across floors breaks the serving link, which is exactly what the AI
+  // flagged live in testing).
+  const groundTypes = new Set(['parking', 'living', 'dining', 'kitchen', 'foyer', 'store', 'staircase']);
   const hasParking = config.rooms.some((r) => r.type === 'parking');
-  const groundTypes = hasParking && floors > 1
-    ? new Set(['parking', 'living', 'kitchen', 'foyer', 'store', 'staircase'])
-    : new Set(['parking', 'living', 'dining', 'kitchen', 'foyer', 'store', 'staircase']);
 
   // State: floorAssignment maps room type → [count per floor]
   const [assignment, setAssignment] = useState<Record<string, number[]>>(() => {
@@ -825,8 +959,10 @@ function FloorDistributionDialog({
         if (floors === 1) {
           arr[0] = r.count;
         } else {
-          // bathrooms: 1 on ground if no parking, rest upstairs
-          if (r.type === 'bathroom' && !hasParking && floors > 1) {
+          // bathrooms: 1 on ground only with a foyer to buffer it
+          // (a bath opening into living/dining/kitchen violates hard rules)
+          const hasFoyer = config.rooms.some((x) => x.type === 'foyer');
+          if (r.type === 'bathroom' && !hasParking && hasFoyer && floors > 1) {
             arr[0] = 1;
             const rest = r.count - 1;
             for (let f = 1; f < floors && rest > 0; f++) {

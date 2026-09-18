@@ -138,12 +138,34 @@ export interface ProhibitionContext {
   entryRoomId?: string;
 }
 
-// Adjacency helper: two rooms are adjacent if they share a wall segment
+// Which wall of `a` is shared with `b` (null when not adjacent).
+type WallId = 'top' | 'right' | 'bottom' | 'left';
+export function sharedWallId(
+  a: { x: number; y: number; width: number; length: number; floor?: number },
+  b: { x: number; y: number; width: number; length: number; floor?: number },
+  tol = 0.6,
+): WallId | null {
+  if (a.floor !== undefined && b.floor !== undefined && a.floor !== b.floor) return null;
+  const yOverlap = a.y < b.y + b.length - tol && a.y + a.length > b.y + tol;
+  const xOverlap = a.x < b.x + b.width - tol && a.x + a.width > b.x + tol;
+  if ((Math.abs(a.x + a.width - b.x) < tol || Math.abs(b.x + b.width - a.x) < tol) && yOverlap) {
+    return Math.abs(a.x + a.width - b.x) < tol ? 'right' : 'left';
+  }
+  if ((Math.abs(a.y + a.length - b.y) < tol || Math.abs(b.y + b.length - a.y) < tol) && xOverlap) {
+    return Math.abs(a.y + a.length - b.y) < tol ? 'bottom' : 'top';
+  }
+  return null;
+}
+
+// Adjacency helper: two rooms are adjacent if they share a wall segment.
+// Floor-aware: rooms on different floors are NEVER adjacent (prevents
+// false violations like "upstairs bath opening off downstairs living").
 export function areAdjacent(
-  a: { x: number; y: number; width: number; length: number },
-  b: { x: number; y: number; width: number; length: number },
+  a: { x: number; y: number; width: number; length: number; floor?: number },
+  b: { x: number; y: number; width: number; length: number; floor?: number },
   tol = 0.6,
 ): boolean {
+  if (a.floor !== undefined && b.floor !== undefined && a.floor !== b.floor) return false;
   // share a vertical wall (left/right)
   const vShare =
     (Math.abs(a.x + a.width - b.x) < tol || Math.abs(b.x + b.width - a.x) < tol) &&
@@ -192,13 +214,18 @@ export const PROHIBITIONS: ProhibitionRule[] = [
     id: 'bathroom-off-living',
     description: 'Bathroom opening directly off living room.',
     check: (ctx) => {
+      // Door-aware: sharing a wall is fine (plumbing walls are normal);
+      // the violation is a DOOR on the shared wall (same floor only).
       const baths = ctx.rooms.filter((r) => r.type === 'bathroom');
-      const living = ctx.rooms.find((r) => r.type === 'living');
-      const dining = ctx.rooms.find((r) => r.type === 'dining');
-      if (!living && !dining) return false;
+      const publicRooms = ctx.rooms.filter((r) => r.type === 'living' || r.type === 'dining');
+      if (publicRooms.length === 0) return false;
       for (const b of baths) {
-        if (living && areAdjacent(b, living)) return true;
-        if (dining && areAdjacent(b, dining)) return true;
+        for (const p of publicRooms) {
+          if (b.floor !== p.floor) continue;
+          if (!areAdjacent(b, p)) continue;
+          const wall = sharedWallId(b, p);
+          if (wall && b.doors.some((d) => d.wall === wall)) return true;
+        }
       }
       return false;
     },

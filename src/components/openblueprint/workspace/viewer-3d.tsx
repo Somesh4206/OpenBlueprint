@@ -35,7 +35,7 @@
 //   - worldZ = item.y + item.length/2 - plot.length/2
 // =========================================================================
 
-import React, { useRef, useMemo, useEffect, Suspense } from 'react';
+import React, { useRef, useMemo, useEffect, useState, Suspense } from 'react';
 import type {
   LayoutData,
   DesignStyle,
@@ -1078,6 +1078,9 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
   const wallOpacity = showAllFloors ? 1 : 0.35;
   const wallTransparent = wallOpacity < 1;
 
+  // Cinematic slow spin on load — stops permanently on first user drag.
+  const [spin, setSpin] = useState(true);
+
   return (
     <>
       {/* Warm soft background — overcast/cream feel matching the reference clay render */}
@@ -1334,7 +1337,8 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
         northDir={layout.plot.northDirection}
       />
 
-      {/* Orbit controls (makeDefault so CameraRig can read state.controls) */}
+      {/* Orbit controls (makeDefault so CameraRig can read state.controls).
+          Gentle auto-spin showcases the model until the user takes over. */}
       <OrbitControls
         makeDefault
         enableDamping
@@ -1343,6 +1347,9 @@ function Scene(props: Viewer3DProps): React.JSX.Element {
         maxDistance={180}
         maxPolarAngle={Math.PI / 2 - 0.02}
         target={[0, 5, 0]}
+        autoRotate={spin}
+        autoRotateSpeed={0.7}
+        onStart={() => setSpin(false)}
       />
     </>
   );

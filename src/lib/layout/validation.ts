@@ -7,6 +7,15 @@ import {
 } from '../types';
 import { ROOM_CATALOG } from '../room-catalog';
 import { Rect, rectsOverlap, rectWithin, buildableArea } from './engine';
+import { doorSwingRects, opensIntoProhibited, sharedWallOf } from './doors';
+import type { RoomRect } from '../types';
+
+/** True when `room` has a door on the wall it shares with `other`. */
+function doorOpensInto(room: RoomRect, other: RoomRect): boolean {
+  const wall = sharedWallOf(room, other);
+  if (!wall) return false;
+  return room.doors.some((d) => d.wall === wall);
+}
 import {
   DESIRED_ADJACENCY,
   PROHIBITED_ADJACENCY,
@@ -165,17 +174,87 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
   if (hasPublic) spaceNotes.push('Circulation available via public rooms');
   else warnings.push({ code: 'NO_PUBLIC', message: 'No public room (living/dining) for circulation.', severity: 'warning' });
 
-  // multi-floor: staircase present when floors > 1
+  // furniture must not block door swings (solver avoids this; flag residuals)
+  for (const f of layout.furniture || []) {
+    const cx = f.x + f.width / 2;
+    const cy = f.y + f.length / 2;
+    const room = layout.rooms.find(
+      (r) => r.floor === f.floor && cx >= r.x && cx <= r.x + r.width && cy >= r.y && cy <= r.y + r.length,
+    );
+    if (!room || room.type === 'parking') continue;
+    const blocked = doorSwingRects(room).some(
+      (s) => f.x < s.x + s.w && f.x + f.width > s.x && f.y < s.y + s.h && f.y + f.length > s.y,
+    );
+    if (blocked) {
+      warnings.push({
+        code: 'FURNITURE_BLOCKS_DOOR',
+        message: `${f.name} sits in a door swing in ${room.name} — move it or slide the door in the 2D editor.`,
+        roomId: room.id,
+        roomName: room.name,
+        severity: 'warning',
+      });
+    }
+  }
+
+  // balloon check: any non-living room beyond 2.8x its planned size almost
+  // always means it was left alone in an oversized band (e.g. dining as big
+  // as parking). Flagged honestly so the user can add rooms to share it.
+  for (const r of layout.rooms) {
+    if (r.type === 'living' || r.type === 'parking' || r.type === 'staircase') continue;
+    const req = config.rooms.find((q) => q.type === r.type);
+    const cat = ROOM_CATALOG[r.type];
+    const pref = req
+      ? (req.preferredWidth || cat.preferredWidth) * (req.preferredLength || cat.preferredLength)
+      : cat.preferredWidth * cat.preferredLength;
+    const area = r.width * r.length;
+    if (pref > 0 && area > pref * 2.8) {
+      warnings.push({
+        code: 'OVERSIZED_ROOM',
+        message: `${r.name} (${Math.round(area)} sq.ft) is much larger than planned (${Math.round(pref)} sq.ft) — it is filling space meant for more rooms. Consider adding rooms or shrinking the plot.`,
+        roomId: r.id,
+        roomName: r.name,
+        severity: 'warning',
+      });
+    }
+  }
+
+  // proportion check: the living room should be the largest public space —
+  // a kitchen or dining room bigger than the living room is almost always
+  // a planning error (e.g. a lone room ballooning to fill its band).
+  for (const k of layout.rooms.filter((r) => r.type === 'kitchen' || r.type === 'dining')) {
+    const living = layout.rooms.find((r) => r.type === 'living' && r.floor === k.floor);
+    if (!living) continue;
+    const kArea = k.width * k.length;
+    const lArea = living.width * living.length;
+    if (kArea > lArea) {
+      warnings.push({
+        code: k.type === 'kitchen' ? 'KITCHEN_OVERSIZED' : 'DINING_OVERSIZED',
+        message: `${k.name} (${Math.round(kArea)} sq.ft) is bigger than ${living.name} (${Math.round(lArea)} sq.ft). ${k.type === 'kitchen' ? 'Kitchens' : 'Dining rooms'} are normally smaller than the living room — consider shrinking it or adding rooms to share the space.`,
+        roomId: k.id,
+        roomName: k.name,
+        severity: 'warning',
+      });
+    }
+  }
+
+  // multi-floor: staircase FURNITURE present on every floor below the top
+  // (staircases are furniture, not rooms — one flight climbs one floor).
   if (layout.floors > 1) {
-    const hasStair = layout.rooms.some((r) => r.type === 'staircase');
-    if (!hasStair) {
+    const missing: number[] = [];
+    for (let f = 0; f < layout.floors - 1; f++) {
+      const hasStair = (layout.furniture || []).some(
+        (it) => (it.type === 'staircase' || it.type === 'spiral-staircase') && it.floor === f,
+      );
+      if (!hasStair) missing.push(f + 1);
+    }
+    if (missing.length > 0) {
       warnings.push({
         code: 'NO_STAIRCASE',
-        message: 'Multi-floor building has no staircase.',
+        message: `No staircase on floor ${missing.join(', ')} — add one with the Stairs tool (selectable, movable, resizable like all furniture).`,
         severity: 'warning',
       });
     } else {
-      spaceNotes.push('Staircase connects floors');
+      spaceNotes.push('Staircase connects all floors');
     }
   }
 
@@ -197,20 +276,38 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
         });
       }
     }
-    // prohibited adjacency
+    // prohibited adjacency — door-aware for hygiene/privacy pairs.
+    // A bathroom sharing a wall with living/dining/kitchen is normal
+    // construction (plumbing/insulation walls); it only violates when a
+    // DOOR opens into that room. parking↔bedroom stays a strict wall rule
+    // (noise/fumes transmit through walls).
     const prohibited = PROHIBITED_ADJACENCY[r.type] || [];
     for (const targetType of prohibited) {
       const violator = layout.rooms.find(
         (o) => o.id !== r.id && o.type === targetType && o.floor === r.floor && areAdjacent(r, o),
       );
       if (violator) {
-        errors.push({
-          code: 'PROHIBITED_ADJACENCY',
-          message: `${r.name} (${r.type}) is adjacent to ${violator.name} (${targetType}) — prohibited by Rule 2.`,
-          roomId: r.id,
-          roomName: r.name,
-          severity: 'error',
-        });
+        const doorAware = opensIntoProhibited(r.type, targetType);
+        const opensIn = doorAware && doorOpensInto(r, violator);
+        if (!doorAware || opensIn) {
+          errors.push({
+            code: 'PROHIBITED_ADJACENCY',
+            message: opensIn
+              ? `${r.name} (${r.type}) opens directly into ${violator.name} (${targetType}) — prohibited by Rule 2.`
+              : `${r.name} (${r.type}) is adjacent to ${violator.name} (${targetType}) — prohibited by Rule 2.`,
+            roomId: r.id,
+            roomName: r.name,
+            severity: 'error',
+          });
+        } else {
+          warnings.push({
+            code: 'SHARED_WALL',
+            message: `${r.name} shares a wall with ${violator.name} but opens elsewhere — acceptable with proper insulation.`,
+            roomId: r.id,
+            roomName: r.name,
+            severity: 'warning',
+          });
+        }
       }
     }
   }

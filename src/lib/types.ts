@@ -155,15 +155,19 @@ export type DesignStyle =
   | 'contemporary'
   | 'luxury';
 
+// Only preferences with real planning teeth. Removed: parking-near-entrance
+// (parking is always carved at the road), internal-staircase (stairs are
+// always inside now), improved-circulation (too vague to steer anything).
 export type PreferenceKey =
   | 'kitchen-near-dining'
   | 'master-attached-bath'
-  | 'parking-near-entrance'
-  | 'internal-staircase'
   | 'balcony-bedroom'
   | 'max-natural-light'
-  | 'improved-circulation'
-  | 'open-plan';
+  | 'open-plan'
+  // legacy (ignored if present in old saved configs)
+  | 'parking-near-entrance'
+  | 'internal-staircase'
+  | 'improved-circulation';
 
 export interface VastuPrefs {
   entrance: 'north' | 'east' | 'south' | 'west' | null;
@@ -178,6 +182,10 @@ export interface LayoutData {
   rooms: RoomRect[];
   furniture: FurnitureItem[];
   strategy: LayoutStrategy;
+  /** AI reasoning trace (present when generated via the AI planner). */
+  reasoning?: string;
+  assumptions?: string[];
+  aiPlanned?: boolean;
 }
 
 export type LayoutStrategy =
@@ -206,6 +214,10 @@ export interface ScoredLayout {
   score: LayoutScore;
   builtUpArea: number;
   roomCount: number;
+  /** AI reasoning trace (present when generated via the AI planner). */
+  reasoning?: string;
+  assumptions?: string[];
+  aiPlanned?: boolean;
 }
 
 export interface ValidationResult {

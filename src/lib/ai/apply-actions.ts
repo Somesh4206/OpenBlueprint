@@ -20,8 +20,14 @@ const STRATEGY_MAP: Record<string, LayoutStrategy> = {
   vastu: 'vastu-optimized',
 };
 
-export function applyActions(layout: LayoutData, config: ProjectConfig, actions: AiAction[]): LayoutData {
+export function applyActions(
+  layout: LayoutData,
+  config: ProjectConfig,
+  actions: AiAction[],
+  floor = 0,
+): LayoutData {
   let rooms = [...layout.rooms];
+  let furniture = [...(layout.furniture || [])];
 
   for (const a of actions) {
     switch (a.type) {
@@ -49,8 +55,15 @@ export function applyActions(layout: LayoutData, config: ProjectConfig, actions:
       }
       case 'add-room': {
         const type = a.roomType || 'bedroom';
+        // Staircases are furniture, not rooms — drop one into the best host
+        // room on the current floor (selectable/resizable like all furniture).
+        if (type === 'staircase' || type === ('spiral-staircase' as RoomType)) {
+          const f = placeStaircaseFurniture(layout, floor);
+          if (f) furniture.push(f);
+          break;
+        }
         const cat = ROOM_CATALOG[type];
-        const newRoom = placeNewRoom(type, a.roomName || cat.defaultName, rooms, layout.plot, a.targetRoomType);
+        const newRoom = placeNewRoom(type, a.roomName || cat.defaultName, rooms, layout.plot, a.targetRoomType, floor);
         if (newRoom) rooms.push(newRoom);
         break;
       }
@@ -83,7 +96,50 @@ export function applyActions(layout: LayoutData, config: ProjectConfig, actions:
     }
   }
 
-  return { ...layout, rooms, furniture: layout.furniture || [] };
+  return { ...layout, rooms, furniture };
+}
+
+/** Drop a staircase furniture item into the largest free corner of the best
+ * host room on `floor` (living → dining → foyer → largest non-parking). */
+function placeStaircaseFurniture(layout: LayoutData, floor: number): import('../types').FurnitureItem | null {
+  const hosts = layout.rooms
+    .filter((r) => r.floor === floor && r.type !== 'parking')
+    .sort((a, b) => {
+      const rank = (t: RoomType) => ({ living: 0, dining: 1, foyer: 2 } as Record<string, number>)[t] ?? 9;
+      return rank(a.type) - rank(b.type) || b.width * b.length - a.width * a.length;
+    });
+  for (const host of hosts) {
+    const w = Math.min(7, host.width - 1);
+    const l = Math.min(12, host.length - 1);
+    if (w < 3 || l < 6) continue;
+    const taken = (layout.furniture || []).filter((it) => it.floor === floor);
+    const m = 0.5;
+    const corners = [
+      { x: host.x + m, y: host.y + m },
+      { x: host.x + host.width - w - m, y: host.y + m },
+      { x: host.x + m, y: host.y + host.length - l - m },
+      { x: host.x + host.width - w - m, y: host.y + host.length - l - m },
+    ];
+    for (const c of corners) {
+      if (c.x < host.x + m - 0.01 || c.y < host.y + m - 0.01) continue;
+      if (c.x + w > host.x + host.width - m + 0.01 || c.y + l > host.y + host.length - m + 0.01) continue;
+      const clash = taken.some(
+        (it) => c.x < it.x + it.width + 0.25 && c.x + w + 0.25 > it.x && c.y < it.y + it.length + 0.25 && c.y + l + 0.25 > it.y,
+      );
+      if (clash) continue;
+      return {
+        id: genId('f'), type: 'staircase', name: 'staircase',
+        x: Math.round(c.x * 10) / 10, y: round1(c.y),
+        width: Math.round(w * 10) / 10, length: Math.round(l * 10) / 10,
+        rotation: 0, floor,
+      };
+    }
+  }
+  return null;
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
 }
 
 function relocateRoom(room: RoomRect, plot: { width: number; length: number }, loc: string): RoomRect {
@@ -134,48 +190,53 @@ function placeNewRoom(
   existing: RoomRect[],
   plot: { width: number; length: number },
   attachTo?: RoomType,
+  floor = 0,
 ): RoomRect | null {
   const cat = ROOM_CATALOG[type];
   const w = cat.preferredWidth;
   const l = cat.preferredLength;
+  const sameFloor = existing.filter((r) => r.floor === floor);
 
-  // try to place adjacent to attachTo room
+  // try to place adjacent to attachTo room (same floor, non-overlapping)
   if (attachTo) {
-    const target = existing.find((r) => r.type === attachTo);
+    const target = sameFloor.find((r) => r.type === attachTo);
     if (target) {
       // try right of target
       const x = target.x + target.width + 0.2;
       const y = target.y;
-      if (x + w <= plot.width - 0.5 && y + l <= plot.length - 0.5) {
-        return mkRoom(type, name, x, y, w, l);
+      if (x + w <= plot.width - 0.5 && y + l <= plot.length - 0.5 && !hitsAny(x, y, w, l, sameFloor)) {
+        return mkRoom(type, name, x, y, w, l, floor);
       }
       // try below target
       const y2 = target.y + target.length + 0.2;
-      if (target.x + w <= plot.width - 0.5 && y2 + l <= plot.length - 0.5) {
-        return mkRoom(type, name, target.x, y2, w, l);
+      if (target.x + w <= plot.width - 0.5 && y2 + l <= plot.length - 0.5 && !hitsAny(target.x, y2, w, l, sameFloor)) {
+        return mkRoom(type, name, target.x, y2, w, l, floor);
       }
     }
   }
 
-  // scan for an empty spot
+  // scan for an empty spot on the SAME floor (never stack onto other floors)
   for (let y = 0.5; y + l <= plot.length - 0.5; y += 2) {
     for (let x = 0.5; x + w <= plot.width - 0.5; x += 2) {
-      const candidate = { x, y, w, h: l };
-      const overlaps = existing.some((r) =>
-        r.x < candidate.x + candidate.w - 0.1 &&
-        r.x + r.width > candidate.x + 0.1 &&
-        r.y < candidate.y + candidate.h - 0.1 &&
-        r.y + r.length > candidate.y + 0.1,
-      );
-      if (!overlaps) {
-        return mkRoom(type, name, x, y, w, l);
+      if (!hitsAny(x, y, w, l, sameFloor)) {
+        return mkRoom(type, name, x, y, w, l, floor);
       }
     }
   }
   return null;
 }
 
-function mkRoom(type: RoomType, name: string, x: number, y: number, w: number, l: number): RoomRect {
+function hitsAny(x: number, y: number, w: number, h: number, rooms: RoomRect[]): boolean {
+  return rooms.some(
+    (r) =>
+      r.x < x + w - 0.1 &&
+      r.x + r.width > x + 0.1 &&
+      r.y < y + h - 0.1 &&
+      r.y + r.length > y + 0.1,
+  );
+}
+
+function mkRoom(type: RoomType, name: string, x: number, y: number, w: number, l: number, floor = 0): RoomRect {
   return {
     id: genId(),
     type,
@@ -184,7 +245,7 @@ function mkRoom(type: RoomType, name: string, x: number, y: number, w: number, l
     y: Math.round(y * 10) / 10,
     width: Math.round(w * 10) / 10,
     length: Math.round(l * 10) / 10,
-    floor: 0,
+    floor,
     doors: [{ wall: 'top', pos: 0.5, width: 3, swing: 'in-right' as const }],
     windows: [],
   };
@@ -245,9 +306,9 @@ export function generateInsights(layout: LayoutData, config: ProjectConfig): Des
     insights.push({ kind: 'positive', title: 'Parking near entrance', detail: 'Parking is placed at the road side for easy access.' });
   }
 
-  // staircase
+  // staircase (furniture, not a room)
   if (layout.floors > 1) {
-    const stair = layout.rooms.find((r) => r.type === 'staircase');
+    const stair = (layout.furniture || []).find((f) => f.type === 'staircase' || f.type === 'spiral-staircase');
     if (stair) insights.push({ kind: 'positive', title: 'Internal staircase', detail: 'Staircase is positioned for vertical circulation across floors.' });
   }
 

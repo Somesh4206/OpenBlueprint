@@ -637,14 +637,32 @@ function WindowToolPanel(props: Props) {
 
 // ============ STAIRS TOOL ============
 function StairsToolPanel(props: Props) {
+  const onThisFloor = props.layout.furniture.filter(
+    (f) => f.floor === props.currentFloor && (f.type === 'staircase' || f.type === 'spiral-staircase'),
+  );
+  function quickAdd(kind: 'staircase' | 'spiral-staircase') {
+    // Drop at plot center of the CURRENT floor — fully movable, rotatable
+    // and resizable afterwards like all furniture (staircases are furniture,
+    // not rooms).
+    const x = props.layout.plot.width / 2 - 3;
+    const y = props.layout.plot.length / 2 - 3;
+    props.onAddFurniture(kind, x, y);
+  }
   return (
     <div className="flex flex-col h-full">
-      <PanelHeader icon={ArrowUpWideNarrow} title="Stairs Tool" subtitle="Add or edit staircase" />
+      <PanelHeader icon={ArrowUpWideNarrow} title="Stairs Tool" subtitle="Staircases are furniture — move, rotate, resize freely" />
       <ScrollArea className="flex-1">
         <div className="p-3 space-y-3">
-          <p className="text-xs text-muted-foreground">A staircase connects floors. Add a staircase room to enable vertical circulation.</p>
-          <Button size="sm" className="w-full h-9 gap-1.5" onClick={() => props.onAddRoom?.('staircase')}>
-            <ArrowUpWideNarrow className="size-4" /> Add Staircase Room
+          <p className="text-xs text-muted-foreground">
+            {onThisFloor.length > 0
+              ? `${onThisFloor.length} staircase${onThisFloor.length > 1 ? 's' : ''} on this floor. Click one to move, rotate or resize it.`
+              : 'No staircase on this floor yet. Add one below — every floor below the top needs one.'}
+          </p>
+          <Button size="sm" className="w-full h-9 gap-1.5" onClick={() => quickAdd('staircase')}>
+            <ArrowUpWideNarrow className="size-4" /> Add Straight Staircase
+          </Button>
+          <Button size="sm" variant="outline" className="w-full h-9 gap-1.5" onClick={() => quickAdd('spiral-staircase')}>
+            <ArrowUpWideNarrow className="size-4" /> Add Spiral Staircase
           </Button>
           <div className="p-3 rounded bg-muted/40 text-xs space-y-1">
             <p className="font-semibold">Staircase norms (India):</p>

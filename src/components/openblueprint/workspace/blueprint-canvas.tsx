@@ -725,19 +725,41 @@ function RoomShape({
         <WindowGraphic key={i} window={w} rx={rx} ry={ry} rw={rw} rl={rl} scale={scale} />
       ))}
 
-      {/* Labels */}
-      {showLabels && rw > 50 && rl > 32 && (
-        <>
-          <text x={rx + rw / 2} y={ry + rl / 2 - 2} textAnchor="middle" fontSize={Math.max(9, Math.min(13, rw / 10))} fontWeight={600} fill="#1f2a3a" pointerEvents="none">
-            {room.name}
-          </text>
-          {showDims && rl > 44 && (
-            <text x={rx + rw / 2} y={ry + rl / 2 + 13} textAnchor="middle" fontSize={Math.max(8, Math.min(10, rw / 12))} fill="#5b6678" className="tech-num" pointerEvents="none">
-              {fmt(room.width)} × {fmt(room.length)}
-            </text>
-          )}
-        </>
-      )}
+      {/* Labels — never overflow the room: shrink to fit, else abbreviate, else hide */}
+      {showLabels && rw > 40 && rl > 30 && (() => {
+        const maxW = rw - 10;
+        const fitFont = (text: string, start: number, min: number) => {
+          let fs = start;
+          while (fs > min && text.length * fs * 0.55 > maxW) fs -= 1;
+          return fs;
+        };
+        const nameFs = fitFont(room.name, Math.max(9, Math.min(13, rw / 10)), 7);
+        const nameFits = room.name.length * nameFs * 0.55 <= maxW;
+        // Abbreviate to first word + initial ("Master Bedroom" → "Master B.") when tight
+        const words = room.name.split(' ');
+        const short = words.length > 1 ? `${words[0]} ${words.slice(1).map((w) => w[0] + '.').join(' ')}` : room.name;
+        const shortFs = fitFont(short, nameFs, 7);
+        const shortFits = short.length * shortFs * 0.55 <= maxW;
+        const label = nameFits ? room.name : shortFits ? short : null;
+        const dims = `${fmt(room.width)} × ${fmt(room.length)}`;
+        const dimsFs = fitFont(dims, Math.max(8, Math.min(10, rw / 12)), 7);
+        const dimsFit = showDims && rl > 44 && dims.length * dimsFs * 0.6 <= maxW;
+        if (!label && !dimsFit) return null;
+        return (
+          <>
+            {label && (
+              <text x={rx + rw / 2} y={ry + rl / 2 - (dimsFit ? 2 : -3)} textAnchor="middle" fontSize={label === room.name ? nameFs : shortFs} fontWeight={600} fill="#1f2a3a" pointerEvents="none" stroke="rgba(255,255,255,0.9)" strokeWidth={3} style={{ paintOrder: 'stroke' }}>
+                {label}
+              </text>
+            )}
+            {dimsFit && (
+              <text x={rx + rw / 2} y={ry + rl / 2 + (label ? 13 : 4)} textAnchor="middle" fontSize={dimsFs} fill="#5b6678" className="tech-num" pointerEvents="none" stroke="rgba(255,255,255,0.9)" strokeWidth={3} style={{ paintOrder: 'stroke' }}>
+                {dims}
+              </text>
+            )}
+          </>
+        );
+      })()}
 
       {/* Resize handles — corner handles are squares, edge handles are circles */}
       {handles.map((h) => {

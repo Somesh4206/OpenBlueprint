@@ -20,6 +20,7 @@ interface Props {
   layout: LayoutData;
   config: ProjectConfig;
   onApplyLayout: (l: LayoutData) => void;
+  currentFloor?: number;
 }
 
 const SUGGESTIONS = [
@@ -31,7 +32,7 @@ const SUGGESTIONS = [
   'Create a more open layout.',
 ];
 
-export function AiAssistant({ layout, config, onApplyLayout }: Props) {
+export function AiAssistant({ layout, config, onApplyLayout, currentFloor = 0 }: Props) {
   const [open, setOpen] = useState(true);
   const [messages, setMessages] = useState<Msg[]>([
     {
@@ -59,8 +60,8 @@ export function AiAssistant({ layout, config, onApplyLayout }: Props) {
     try {
       const res = await fetch('/api/ai/design-assistant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, layout, config }),
+        headers: { 'Content-Type': 'application/json', ...(await import('@/lib/ai/client')).aiHeaders() },
+        body: JSON.stringify({ message, layout, config, floor: currentFloor }),
       });
       const data = await res.json();
       const response = data.response as AiAssistantResponse;
