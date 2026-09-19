@@ -108,6 +108,10 @@ export interface WindowMarker {
   wall: 'top' | 'right' | 'bottom' | 'left';
   pos: number; // 0..1 along the wall
   width: number; // in units
+  // true when the wall sits on the plot/buildable edge (real daylight).
+  // Recessed walls with no neighbor get windows too, but those do not
+  // satisfy the external-window invariant.
+  external?: boolean;
 }
 
 export interface PlotConfig {

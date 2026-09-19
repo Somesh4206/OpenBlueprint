@@ -81,12 +81,47 @@ function roadWall(plot: PlotConfig): Wall {
   }
 }
 
-function isOnRoadSide(r: RoomRect, plot: PlotConfig, tol = 0.6): boolean {
+function getBuildableBounds(plot: PlotConfig): { minX: number; maxX: number; minY: number; maxY: number } {
   switch (plot.roadSide) {
-    case 'south': return Math.abs(r.y + r.length - plot.length) < tol;
-    case 'north': return Math.abs(r.y) < tol;
-    case 'east': return Math.abs(r.x + r.width - plot.width) < tol;
-    case 'west': return Math.abs(r.x) < tol;
+    case 'north':
+      return {
+        minX: plot.setbackSides,
+        maxX: plot.width - plot.setbackSides,
+        minY: plot.setbackFront,
+        maxY: plot.length - plot.setbackRear,
+      };
+    case 'east':
+      return {
+        minX: plot.setbackRear,
+        maxX: plot.width - plot.setbackFront,
+        minY: plot.setbackSides,
+        maxY: plot.length - plot.setbackSides,
+      };
+    case 'west':
+      return {
+        minX: plot.setbackFront,
+        maxX: plot.width - plot.setbackRear,
+        minY: plot.setbackSides,
+        maxY: plot.length - plot.setbackSides,
+      };
+    case 'south':
+    default:
+      return {
+        minX: plot.setbackSides,
+        maxX: plot.width - plot.setbackSides,
+        minY: plot.setbackRear,
+        maxY: plot.length - plot.setbackFront,
+      };
+  }
+}
+
+function isOnRoadSide(r: RoomRect, plot: PlotConfig, tol = 0.8): boolean {
+  const b = getBuildableBounds(plot);
+  switch (plot.roadSide) {
+    case 'south': return Math.abs(r.y + r.length - b.maxY) < tol || Math.abs(r.y + r.length - plot.length) < tol;
+    case 'north': return Math.abs(r.y - b.minY) < tol || Math.abs(r.y) < tol;
+    case 'east': return Math.abs(r.x + r.width - b.maxX) < tol || Math.abs(r.x + r.width - plot.width) < tol;
+    case 'west': return Math.abs(r.x - b.minX) < tol || Math.abs(r.x) < tol;
   }
 }
 
@@ -300,20 +335,41 @@ function sharedLen(a: RoomRect, b: RoomRect): number {
   return Math.max(v, h);
 }
 
-function solveWindows(room: RoomRect, plot: PlotConfig, _byId: Map<string, RoomRect>): WindowMarker[] {
+function solveWindows(room: RoomRect, plot: PlotConfig, byId: Map<string, RoomRect>): WindowMarker[] {
   if (room.type === 'parking' || room.type === 'store' || room.type === 'utility' || room.type === 'staircase') return [];
+  const b = getBuildableBounds(plot);
   const outer: Wall[] = [];
-  if (room.y <= 0.6) outer.push('top');
-  if (room.y + room.length >= plot.length - 0.6) outer.push('bottom');
-  if (room.x <= 0.6) outer.push('left');
-  if (room.x + room.width >= plot.width - 0.6) outer.push('right');
-  if (outer.length === 0) return [];
+
+  // Walls at the buildable edge or plot edge
+  if (room.y <= b.minY + 0.6 || room.y <= 0.6) outer.push('top');
+  if (room.y + room.length >= b.maxY - 0.6 || room.y + room.length >= plot.length - 0.6) outer.push('bottom');
+  if (room.x <= b.minX + 0.6 || room.x <= 0.6) outer.push('left');
+  if (room.x + room.width >= b.maxX - 0.6 || room.x + room.width >= plot.width - 0.6) outer.push('right');
+
+  // Also check if any wall has no neighbor on this floor (e.g. courtyard or recessed wall).
+  // Recessed walls are tracked separately: they get windows, but those are
+  // NOT external and do not satisfy the external-window invariant.
+  const sameFloor = Array.from(byId.values()).filter((o) => o.id !== room.id && o.floor === room.floor);
+  const allWalls: Wall[] = ['top', 'bottom', 'left', 'right'];
+  const recessed: Wall[] = [];
+  for (const w of allWalls) {
+    if (!outer.includes(w)) {
+      const hasNeighbor = sameFloor.some((o) => sharedWall(room, o)?.wall === w);
+      if (!hasNeighbor) recessed.push(w);
+    }
+  }
+
+  const externalCount = outer.length;
+  const ordered = [...outer, ...recessed];
+  if (ordered.length === 0) return [];
   // Bedrooms + living get up to 2 windows (cross-ventilation); others 1.
-  const count = room.type === 'bedroom' || room.type === 'living' ? Math.min(2, outer.length) : 1;
+  // External walls first so daylight windows win the slots.
+  const count = room.type === 'bedroom' || room.type === 'living' ? Math.min(2, ordered.length) : 1;
   const h = hash01(`${room.name}|${room.type}|${room.floor}|${room.x}|${room.y}w`);
-  return outer.slice(0, count).map((wall, i) => ({
+  return ordered.slice(0, count).map((wall, i) => ({
     wall,
     pos: clamp01(0.35 + h * 0.2 + i * 0.15),
     width: room.type === 'living' ? 5 : 4,
+    external: i < externalCount,
   }));
 }

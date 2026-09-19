@@ -170,6 +170,82 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
   if (doorIssues === 0) accessNotes.push('All rooms have door access');
   accessNotes.push('Room connectivity checked');
 
+  // ---- Invariants: door presence, foyer reachability, daylight, area ----
+  const HABITABLE = new Set(['living', 'bedroom', 'kitchen', 'dining']);
+  for (const [floor, rooms] of byFloor) {
+    for (const r of rooms) {
+      if (r.type === 'parking' || r.type === 'staircase') continue;
+      if (r.doors.length === 0) {
+        errors.push({
+          code: 'ROOM_WITHOUT_DOOR',
+          message: `${r.name} has no door and cannot be entered.`,
+          roomId: r.id,
+          roomName: r.name,
+          severity: 'error',
+        });
+      }
+    }
+    // Foyer reachability: BFS from foyer/lobby over door edges. Bedrooms are
+    // sinks (reachable as destinations, never transit) — a room only
+    // reachable through a bedroom is a passage violation.
+    const foyers = rooms.filter((r) => r.type === 'foyer');
+    if (foyers.length > 0) {
+      const visited = new Set<string>(foyers.map((f) => f.id));
+      const queue = [...foyers];
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        for (const o of rooms) {
+          if (o.id === cur.id || visited.has(o.id)) continue;
+          if (doorOpensInto(cur, o) || doorOpensInto(o, cur)) {
+            visited.add(o.id);
+            if (o.type !== 'bedroom') queue.push(o);
+          }
+        }
+      }
+      for (const r of rooms) {
+        if (r.type === 'foyer' || visited.has(r.id)) continue;
+        errors.push({
+          code: 'FOYER_UNREACHABLE',
+          message: `${r.name} is not reachable from the foyer without crossing a bedroom.`,
+          roomId: r.id,
+          roomName: r.name,
+          severity: 'error',
+        });
+      }
+    }
+    // Habitable rooms need a real external window (plot/buildable edge).
+    for (const r of rooms) {
+      if (!HABITABLE.has(r.type)) continue;
+      if (!r.windows.some((w) => w.external)) {
+        errors.push({
+          code: 'NO_EXTERNAL_WINDOW',
+          message: `${r.name} has no window on an external wall.`,
+          roomId: r.id,
+          roomName: r.name,
+          severity: 'error',
+        });
+      }
+    }
+    // Area conservation against the buildable footprint (rooms tile it).
+    const b = buildableArea(layout.plot, floor);
+    const footprint = b.w * b.h;
+    const sum = rooms.reduce((s, r) => s + r.width * r.length, 0);
+    const mismatch = footprint > 0 ? Math.abs(sum - footprint) / footprint : 0;
+    if (mismatch > 0.05) {
+      errors.push({
+        code: 'AREA_MISMATCH',
+        message: `Floor ${floor + 1} rooms cover ${Math.round(sum)} sq.ft of a ${Math.round(footprint)} sq.ft buildable footprint.`,
+        severity: 'error',
+      });
+    } else if (mismatch > 0.02) {
+      warnings.push({
+        code: 'AREA_MISMATCH',
+        message: `Floor ${floor + 1} rooms cover ${Math.round(sum)} sq.ft of a ${Math.round(footprint)} sq.ft buildable footprint.`,
+        severity: 'warning',
+      });
+    }
+  }
+
   // ---- Space planning: required rooms present ----
   const presentCounts = new Map<string, number>();
   for (const r of layout.rooms) {
