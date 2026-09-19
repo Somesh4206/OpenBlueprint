@@ -13,6 +13,7 @@ import { ROOM_CATALOG } from '../room-catalog';
 import { scoreLayout } from './scoring';
 import { validateLayout } from './validation';
 import { allocateZones, optimizeAdjacencies, packRooms, placeZoneRooms } from '../architecture/planner';
+import { normalizeRequirements } from '../architecture/normalize';
 import { doorSwingRects, opensIntoProhibited, sharedWallOf, solveOpenings, swingRectFor } from './doors';
 
 /**
@@ -248,13 +249,38 @@ export function expandRequirements(reqs: RoomRequirement[]): RoomRequirement[] {
 }
 
 // ---- Buildable rectangle (plot minus setbacks) ----
-export function buildableArea(plot: PlotConfig, floor: number): Rect {
-  return {
-    x: plot.setbackSides,
-    y: plot.setbackRear,
-    w: Math.max(0, plot.width - plot.setbackSides * 2),
-    h: Math.max(0, plot.length - (plot.setbackFront + plot.setbackRear)),
-  };
+export function buildableArea(plot: PlotConfig, _floor?: number): Rect {
+  switch (plot.roadSide) {
+    case 'north':
+      return {
+        x: plot.setbackSides,
+        y: plot.setbackFront,
+        w: Math.max(0, plot.width - plot.setbackSides * 2),
+        h: Math.max(0, plot.length - (plot.setbackFront + plot.setbackRear)),
+      };
+    case 'east':
+      return {
+        x: plot.setbackRear,
+        y: plot.setbackSides,
+        w: Math.max(0, plot.width - (plot.setbackFront + plot.setbackRear)),
+        h: Math.max(0, plot.length - plot.setbackSides * 2),
+      };
+    case 'west':
+      return {
+        x: plot.setbackFront,
+        y: plot.setbackSides,
+        w: Math.max(0, plot.width - (plot.setbackFront + plot.setbackRear)),
+        h: Math.max(0, plot.length - plot.setbackSides * 2),
+      };
+    case 'south':
+    default:
+      return {
+        x: plot.setbackSides,
+        y: plot.setbackRear,
+        w: Math.max(0, plot.width - plot.setbackSides * 2),
+        h: Math.max(0, plot.length - (plot.setbackFront + plot.setbackRear)),
+      };
+  }
 }
 
 // ---- Strategy bias: keeps the 5 design variants distinct ----
@@ -398,6 +424,38 @@ function capKitchenVsLiving(reqs: RoomRequirement[]): RoomRequirement[] {
   );
 }
 
+/** Vastu: kitchen belongs in SE (Agni) or NW (Vayu) — never SW. Swap a SW
+ * kitchen with an SE occupant when possible, else NW. Tiling preserved
+ * (rects only permuted). */
+function enforceVastuKitchen(out: RoomRect[], plot: PlotConfig, floor: number): void {
+  const kitchens = out.filter((r) => r.floor === floor && r.type === 'kitchen');
+  if (kitchens.length === 0) return;
+  const quad = (r: RoomRect) => {
+    const cx = (r.x + r.width / 2) / plot.width;
+    const cy = (r.y + r.length / 2) / plot.length;
+    if (cx >= 0.5 && cy >= 0.5) return 'SE';
+    if (cx < 0.5 && cy < 0.5) return 'NW';
+    if (cx < 0.5 && cy >= 0.5) return 'SW';
+    return 'NE';
+  };
+  for (const k of kitchens) {
+    if (quad(k) !== 'SW') continue;
+    const sameFloor = out.filter((r) => r.floor === floor && r.id !== k.id && r.type !== 'parking');
+    const se = sameFloor.filter((r) => quad(r) === 'SE' && r.type !== 'bathroom');
+    se.sort((a, b) => Math.abs(a.width * a.length - k.width * k.length) - Math.abs(b.width * b.length - k.width * k.length));
+    let partner = se[0];
+    if (!partner) {
+      const nw = sameFloor.filter((r) => quad(r) === 'NW' && r.type !== 'bathroom');
+      nw.sort((a, b) => Math.abs(a.width * a.length - k.width * k.length) - Math.abs(b.width * b.length - k.width * k.length));
+      partner = nw[0];
+    }
+    if (!partner) continue;
+    const rx = k.x, ry = k.y, rw = k.width, rl = k.length;
+    k.x = partner.x; k.y = partner.y; k.width = partner.width; k.length = partner.length;
+    partner.x = rx; partner.y = ry; partner.width = rw; partner.length = rl;
+  }
+}
+
 /** AI anchor → sort rank used inside each zone (front first, rear last). */
 function anchorRankOf(p?: RoomPlacement): number {
   if (!p) return 2;
@@ -416,7 +474,15 @@ export function generateFloorLayout(
   floorReqs: RoomRequirement[] = expandRequirements(config.rooms),
   aiPlan?: AIPlan,
 ): RoomRect[] {
-  const buildable = buildableArea(config.plot, floor);
+  let buildable = buildableArea(config.plot, floor);
+  // Structural: upper floors must sit on the ground load-bearing footprint.
+  // The ground carves a parking bay + porch column at the road side; an upper
+  // floor using the full buildable rect would float ~14ft over open yard.
+  // Clamp upper floors to the ground house band so no habitable room cantilevers.
+  if (floor > 0 && config.rooms.some((r) => r.type === 'parking')) {
+    const groundCarve = carveParkingCorner(buildableArea(config.plot, 0), config.plot.roadSide);
+    if (groundCarve) buildable = groundCarve.house;
+  }
   let reqs = [...floorReqs];
   if (config.floors > 1) {
     reqs = ensureStaircase(reqs, config.floors);
@@ -520,6 +586,10 @@ export function generateFloorLayout(
 
   // Step 3: (per-group adjacency optimization already applied above)
   out.push(...placed);
+
+  // Step 3b: Vastu lock — kitchen (fire) must never sit in SW (earth). When
+  // enabled, swap a SW kitchen with an SE occupant (or NW fallback).
+  if (config.vastuEnabled) enforceVastuKitchen(out, config.plot, floor);
 
   // Step 4: Deterministic door + window solver over the whole floor, so doors
   // sit on real shared walls between connected rooms (never random).
@@ -634,6 +704,27 @@ export function distributeRoomsByFloor(reqs: RoomRequirement[], floors: number, 
     }
   }
 
+  // Duplex circulation: every upper floor needs a common lobby for the stair
+  // landing (never arrive inside a bedroom). Auto-add an Upper Lobby foyer
+  // when no foyer/living/dining/office is assigned upstairs.
+  if (floors > 1 && !floorAssignment) {
+    const COMMON = new Set(['foyer', 'living', 'dining', 'office']);
+    for (let f = 1; f < floors; f++) {
+      if (!byFloor[f].some((r) => COMMON.has(r.type))) {
+        byFloor[f].push({
+          type: 'foyer',
+          name: 'Upper Lobby',
+          count: 1,
+          minWidth: 5,
+          minLength: 5,
+          preferredWidth: 6,
+          preferredLength: 8,
+          priority: 'high',
+        });
+      }
+    }
+  }
+
   return byFloor;
 }
 
@@ -682,26 +773,35 @@ function applyPlanFloors(byFloor: RoomRequirement[][], plan: AIPlan, floors: num
 
 export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy, aiPlan?: AIPlan): LayoutData {
   const rooms: RoomRect[] = [];
-  const byFloor = distributeRoomsByFloor(config.rooms, config.floors, config.floorAssignment);
+  const normalized = normalizeRequirements(config.rooms);
+  const byFloor = distributeRoomsByFloor(normalized.reqs, config.floors, config.floorAssignment);
   if (aiPlan) applyPlanFloors(byFloor, aiPlan, config.floors);
   for (let f = 0; f < config.floors; f++) {
     const floorRooms = generateFloorLayout(config, strategy, f, byFloor[f] || [], aiPlan);
     rooms.push(...floorRooms);
   }
+  // Enforce a private en-suite for the master + a real front entrance before
+  // furniture, so swings and fixtures plan around the final doors.
+  ensureMasterEnSuite(rooms);
+  ensureFrontEntrance(rooms, config.plot);
   // auto-place starter furniture in each room based on room type
   const furniture = autoPlaceFurniture(rooms);
   // Slide doors along their walls (mirrored twin included) so no door swing
-  // lands on furniture, then re-seat furniture against the final door spots.
-  // Parking shutters are exempt (cars live under them).
+  // lands on furniture, then re-seat non-staircase furniture against the final door spots.
+  // Parking shutters and staircases are exempt (stairs stack vertically; cars live under shutters).
   nudgeDoorsClearOfFurniture(rooms, furniture);
   for (const f of furniture) {
+    if (f.type === 'staircase' || f.type === 'spiral-staircase' || f.type === 'car' || f.type === 'bike') continue;
     const cx = f.x + f.width / 2;
     const cy = f.y + f.length / 2;
     const room = rooms.find(
       (r) => r.floor === f.floor && cx >= r.x && cx <= r.x + r.width && cy >= r.y && cy <= r.y + r.length,
     );
     if (!room) continue;
-    const spot = bestCorner(room, f.width, f.length);
+    const others = furniture
+      .filter((o) => o.id !== f.id && o.floor === f.floor)
+      .map((o) => ({ x: o.x, y: o.y, w: o.width, h: o.length }));
+    const spot = bestCorner(room, f.width, f.length, others);
     f.x = round(spot.x);
     f.y = round(spot.y);
   }
@@ -712,6 +812,7 @@ export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy, 
     furniture,
     strategy,
     reasoning: aiPlan?.reasoning,
+    assumptions: normalized.assumptions,
   };
 }
 
@@ -728,49 +829,49 @@ function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem
         // Big room → double bed; small room → single bed (a 6ft bed plus a
         // door swing cannot physically clear an 8ft room — stage honestly).
         const area = room.width * room.length;
-        if (area >= 100) put(fitFurniture('bed-double', room, Math.min(6, room.width - 1), Math.min(7, room.length - 1)));
-        else put(fitFurniture('bed-single', room, Math.min(3.5, room.width - 1), Math.min(6.5, room.length - 1)));
+        if (area >= 100) put(fitFurniture('bed-double', room, Math.min(6, room.width - 1), Math.min(7, room.length - 1), items));
+        else put(fitFurniture('bed-single', room, Math.min(3.5, room.width - 1), Math.min(6.5, room.length - 1), items));
         break;
       }
       case 'living': {
         const area = room.width * room.length;
-        if (area >= 130) put(fitFurniture('sofa-3', room, Math.min(7, room.width - 1), Math.min(3, room.length - 1)));
-        else put(fitFurniture('sofa-2', room, Math.min(5, room.width - 1), Math.min(3, room.length - 1)));
+        if (area >= 130) put(fitFurniture('sofa-3', room, Math.min(7, room.width - 1), Math.min(3, room.length - 1), items));
+        else put(fitFurniture('sofa-2', room, Math.min(5, room.width - 1), Math.min(3, room.length - 1), items));
         break;
       }
       case 'kitchen': {
         // Just a kitchen counter — the essential. User adds stove, sink, fridge, island.
-        put(fitFurniture('kitchen-counter', room, Math.min(8, room.width - 1), Math.min(2, room.length - 1)));
+        put(fitFurniture('kitchen-counter', room, Math.min(8, room.width - 1), Math.min(2, room.length - 1), items));
         break;
       }
       case 'dining': {
         const area = room.width * room.length;
-        if (area >= 70) put(fitFurniture('table-dining-6', room, Math.min(5, room.width - 1), Math.min(3, room.length - 1)));
-        else put(fitFurniture('table-round', room, Math.min(4, room.width - 1), Math.min(4, room.length - 1)));
+        if (area >= 70) put(fitFurniture('table-dining-6', room, Math.min(5, room.width - 1), Math.min(3, room.length - 1), items));
+        else put(fitFurniture('table-round', room, Math.min(4, room.width - 1), Math.min(4, room.length - 1), items));
         break;
       }
       case 'bathroom': {
         // Just a toilet — the essential. User adds vanity, shower, bathtub.
-        put(fitFurniture('toilet', room, Math.min(2, room.width - 1), Math.min(3, room.length - 1)));
+        put(fitFurniture('toilet', room, Math.min(2, room.width - 1), Math.min(3, room.length - 1), items));
         break;
       }
       case 'office': {
         // Just a desk — the essential. User adds chair, bookshelf.
-        put(fitFurniture('desk', room, Math.min(5, room.width - 1), Math.min(2.5, room.length - 1)));
+        put(fitFurniture('desk', room, Math.min(5, room.width - 1), Math.min(2.5, room.length - 1), items));
         break;
       }
       case 'pooja': {
         // Just the altar — the essential.
-        put(fitFurniture('pooja-altar', room, Math.min(3, room.width - 1), Math.min(1.5, room.length - 1)));
+        put(fitFurniture('pooja-altar', room, Math.min(3, room.width - 1), Math.min(1.5, room.length - 1), items));
         break;
       }
       case 'parking': {
         // Car + bike are standard/essential for Indian homes.
-        put(fitFurniture('car', room, Math.min(6, room.width - 1), Math.min(10, room.length - 1)));
+        put(fitFurniture('car', room, Math.min(6, room.width - 1), Math.min(10, room.length - 1), items));
         const carW = Math.min(6, room.width - 1);
         const bikeX = room.x + 1 + carW + 1;
         if (bikeX + 2.5 < room.x + room.width - 0.5) {
-          put(fitFurniture('bike', { ...room, x: bikeX }, 2.5, Math.min(6, room.length - 1)));
+          put(fitFurniture('bike', { ...room, x: bikeX }, 2.5, Math.min(6, room.length - 1), items));
         }
         break;
       }
@@ -797,11 +898,27 @@ function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem
     // flight sets the anchor; upper flights reuse the exact spot when a
     // host room there contains it, else fall back to corner search.
     let anchor: { x: number; y: number; w: number; h: number } | null = null;
+    // Upper common lobbies (for stackable ground-host preference).
+    const lobbyRects = rooms.filter((r) => r.floor > 0 && LANDING_HOSTS.has(r.type));
+    const overlapsLobby = (h: RoomRect) =>
+      lobbyRects.some((l) => {
+        const ix = Math.min(h.x + h.width, l.x + l.width) - Math.max(h.x, l.x);
+        const iy = Math.min(h.y + h.length, l.y + l.length) - Math.max(h.y, l.y);
+        return ix >= 4 && iy >= 7;
+      });
     for (const f of floorList) {
       if (f >= Math.max(...floorList)) continue; // top floor needs no up-stair
       const hosts = rooms
         .filter((r) => r.floor === f && r.type !== 'parking')
-        .sort((a, b) => hostRank(a.type) - hostRank(b.type) || b.width * b.length - a.width * a.length);
+        .sort((a, b) => {
+          // Ground flight prefers a host that stacks over an upper lobby.
+          if (f === 0) {
+            const ao = overlapsLobby(a) ? 0 : 1;
+            const bo = overlapsLobby(b) ? 0 : 1;
+            if (ao !== bo) return ao - bo;
+          }
+          return hostRank(a.type) - hostRank(b.type) || b.width * b.length - a.width * a.length;
+        });
       for (const host of hosts) {
         const stair = placeStaircaseIn(host, items, f, anchor);
         if (stair) {
@@ -811,32 +928,85 @@ function autoPlaceFurniture(rooms: RoomRect[]): import('../types').FurnitureItem
         }
       }
     }
-    // Place a staircase LANDING on the top floor at the same anchor XY.
-    // Without this the top floor shows no staircase at all — architecturally
-    // the stairwell opening / landing exists on every floor the stairs reach.
+    // Place a staircase LANDING on the top floor. Privacy beats perfect
+    // stacking: the landing must arrive into a common lobby (foyer/living/
+    // dining/office), never inside a bedroom/bathroom/kitchen. Prefer the
+    // same stacked XY when a common room contains it; otherwise fall back to
+    // a clear side-wall corner in the best common host.
     if (anchor) {
       const topFloor = Math.max(...floorList);
-      const topHost = rooms
-        .filter((r) => r.floor === topFloor && r.type !== 'parking')
-        .find((h) =>
-          anchor!.x >= h.x + 0.4 &&
-          anchor!.y >= h.y + 0.4 &&
-          anchor!.x + anchor!.w <= h.x + h.width + 0.1 &&
-          anchor!.y + anchor!.h <= h.y + h.length + 0.1,
-        );
-      if (topHost) {
-        // Only place if it doesn't overlap existing furniture on that floor
+      const topRooms = rooms.filter((r) => r.floor === topFloor && r.type !== 'parking');
+      const contains = (h: RoomRect) =>
+        anchor!.x >= h.x + 0.4 &&
+        anchor!.y >= h.y + 0.4 &&
+        anchor!.x + anchor!.w <= h.x + h.width + 0.1 &&
+        anchor!.y + anchor!.h <= h.y + h.length + 0.1;
+      const clearOfFurniture = (x: number, y: number, w: number, h: number) => {
         const topBlockers = items
           .filter((it) => it.floor === topFloor)
           .map((it) => ({ x: it.x, y: it.y, w: it.width, h: it.length }));
-        const overlaps = topBlockers.some((b) => rectsOverlapLoose(anchor!, b, 0.25));
-        if (!overlaps) {
-          items.push({
-            id: genId('f'), type: 'staircase', name: 'staircase',
-            x: round(anchor.x), y: round(anchor.y),
-            width: round(anchor.w), length: round(anchor.h),
-            rotation: 0, floor: topFloor,
-          });
+        return !topBlockers.some((b) => rectsOverlapLoose({ x, y, w, h }, b, 0.25));
+      };
+      // 1. Stacked anchor inside a common host.
+      const stacked = topRooms
+        .filter((h) => LANDING_HOSTS.has(h.type) && contains(h))
+        .sort((a, b) => hostRank(a.type) - hostRank(b.type))[0]
+        || topRooms.filter((h) => !LANDING_BANNED.has(h.type) && contains(h))[0];
+      if (stacked && clearOfFurniture(anchor.x, anchor.y, anchor.w, anchor.h)) {
+        items.push({
+          id: genId('f'), type: 'staircase', name: 'staircase',
+          x: round(anchor.x), y: round(anchor.y),
+          width: round(anchor.w), length: round(anchor.h),
+          rotation: 0, floor: topFloor,
+        });
+      } else {
+        // 2. Fresh side-wall corner in the best common host (privacy over stacking).
+        const hosts = [...topRooms].sort(
+          (a, b) => hostRank(a.type) - hostRank(b.type) || b.width * b.length - a.width * a.length,
+        );
+        let landed = false;
+        for (const host of hosts) {
+          if (LANDING_BANNED.has(host.type)) continue;
+          const stair = placeStaircaseIn(host, items, topFloor, null);
+          if (stair) {
+            items.push(stair);
+            landed = true;
+            break;
+          }
+        }
+        // 3. Last resort: compact stairwell opening (3×4) in the upper lobby.
+        // A tight 30×40 upper lobby can be too shallow for a full 4×7 flight;
+        // a smaller opening marker still shows arrival in common space and
+        // never violates bedroom privacy with a missing stair.
+        if (!landed) {
+          const lobby = hosts.find((h) => !LANDING_BANNED.has(h.type));
+          if (lobby) {
+            const w = Math.min(4, lobby.width - 1);
+            const l = Math.min(4, lobby.length - 1);
+            if (w >= 3 && l >= 3) {
+              const m = 0.5;
+              const corners = [
+                { x: lobby.x + m, y: lobby.y + m },
+                { x: lobby.x + lobby.width - w - m, y: lobby.y + m },
+                { x: lobby.x + m, y: lobby.y + lobby.length - l - m },
+                { x: lobby.x + lobby.width - w - m, y: lobby.y + lobby.length - l - m },
+              ];
+              const blockers = items
+                .filter((it) => it.floor === topFloor)
+                .map((it) => ({ x: it.x, y: it.y, w: it.width, h: it.length }));
+              for (const s of doorSwingRects(lobby)) blockers.push(s);
+              for (const c of corners) {
+                if (blockers.some((b) => rectsOverlapLoose({ x: c.x, y: c.y, w, h: l }, b, 0.25))) continue;
+                items.push({
+                  id: genId('f'), type: 'staircase', name: 'staircase',
+                  x: round(c.x), y: round(c.y), width: round(w), length: round(l),
+                  rotation: 0, floor: topFloor,
+                });
+                landed = true;
+                break;
+              }
+            }
+          }
         }
       }
     }
@@ -856,6 +1026,7 @@ function fitFurniture(
   room: RoomRect,
   w: number,
   l: number,
+  existingItems: import('../types').FurnitureItem[] = [],
 ): import('../types').FurnitureItem | null {
   const maxW = room.width - 1;
   const maxL = room.length - 1;
@@ -863,14 +1034,10 @@ function fitFurniture(
   const cw = Math.min(w, maxW);
   const cl = Math.min(l, maxL);
   if (cw < 1 || cl < 1) return null;
-  const m = 0.5;
-  const corners = [
-    { x: room.x + m, y: room.y + m }, // top-left
-    { x: room.x + room.width - cw - m, y: room.y + m }, // top-right
-    { x: room.x + m, y: room.y + room.length - cl - m }, // bottom-left
-    { x: room.x + room.width - cw - m, y: room.y + room.length - cl - m }, // bottom-right
-  ];
-  const spot = bestCorner(room, cw, cl);
+  const others = existingItems
+    .filter((it) => it.floor === room.floor)
+    .map((it) => ({ x: it.x, y: it.y, w: it.width, h: it.length }));
+  const spot = bestCorner(room, cw, cl, others);
   return {
     id: genId('f'),
     type,
@@ -884,12 +1051,18 @@ function fitFurniture(
   };
 }
 
-/** Host-room preference for the staircase (social core first). */
+/** Host-room preference for the staircase: dedicated foyer/lobby first, then
+ * social core along a side perimeter wall — never private rooms unless forced. */
 function hostRank(type: RoomRect['type']): number {
-  const order = ['living', 'dining', 'foyer', 'office', 'bedroom', 'kitchen', 'utility', 'store', 'bathroom', 'balcony', 'pooja'];
+  const order = ['foyer', 'living', 'dining', 'office', 'utility', 'store', 'kitchen', 'balcony', 'pooja', 'bedroom', 'bathroom'];
   const i = order.indexOf(type);
   return i < 0 ? 99 : i;
 }
+
+/** Room types the upstairs stair landing may arrive into (common lobby only). */
+const LANDING_HOSTS = new Set(['foyer', 'living', 'dining', 'office']);
+/** Room types the landing must never arrive into (privacy violation). */
+const LANDING_BANNED = new Set(['bedroom', 'bathroom', 'kitchen']);
 
 function rectsOverlapLoose(
   a: { x: number; y: number; w: number; h: number },
@@ -944,12 +1117,22 @@ function placeStaircaseIn(
   for (const s of doorSwingRects(host)) blockers.push(s);
   for (const s of sizes) {
     if (s.w < 3 || s.l < 6) continue;
-    const corners = [
-      { x: host.x + m, y: host.y + m },
-      { x: host.x + host.width - s.w - m, y: host.y + m },
-      { x: host.x + m, y: host.y + host.length - s.l - m },
-      { x: host.x + host.width - s.w - m, y: host.y + host.length - s.l - m },
-    ];
+    // Side-perimeter first: left-wall corners before right-wall corners, so a
+    // living/dining-hosted stair stays out of the primary seating arc.
+    const corners =
+      host.type === 'living' || host.type === 'dining'
+        ? [
+            { x: host.x + m, y: host.y + m },
+            { x: host.x + m, y: host.y + host.length - s.l - m },
+            { x: host.x + host.width - s.w - m, y: host.y + m },
+            { x: host.x + host.width - s.w - m, y: host.y + host.length - s.l - m },
+          ]
+        : [
+            { x: host.x + m, y: host.y + m },
+            { x: host.x + host.width - s.w - m, y: host.y + m },
+            { x: host.x + m, y: host.y + host.length - s.l - m },
+            { x: host.x + host.width - s.w - m, y: host.y + host.length - s.l - m },
+          ];
     for (const c of corners) {
       const r = { x: c.x, y: c.y, w: s.w, h: s.l };
       if (c.x < host.x + m - 0.01 || c.y < host.y + m - 0.01) continue;
@@ -999,7 +1182,12 @@ const OPPOSITE_WALL: Record<Wall, Wall> = { top: 'bottom', bottom: 'top', left: 
  * Best furniture corner: least total door-swing overlap (zero when the room
  * allows it). Shared by initial placement and post-nudge re-seating.
  */
-function bestCorner(room: RoomRect, cw: number, cl: number): { x: number; y: number } {
+function bestCorner(
+  room: RoomRect,
+  cw: number,
+  cl: number,
+  otherItems: { x: number; y: number; w: number; h: number }[] = [],
+): { x: number; y: number } {
   const m = 0.5;
   const corners = [
     { x: room.x + m, y: room.y + m },
@@ -1016,6 +1204,11 @@ function bestCorner(room: RoomRect, cw: number, cl: number): { x: number; y: num
       const iy = Math.min(r.y + r.h, s.y + s.h) - Math.max(r.y, s.y);
       if (ix > 0 && iy > 0) overlap += ix * iy;
     }
+    for (const o of otherItems) {
+      const ix = Math.min(r.x + r.w, o.x + o.w) - Math.max(r.x, o.x);
+      const iy = Math.min(r.y + r.h, o.y + o.h) - Math.max(r.y, o.y);
+      if (ix > 0 && iy > 0) overlap += ix * iy * 1000;
+    }
     return { c, overlap };
   });
   scored.sort((a, b) => a.overlap - b.overlap);
@@ -1024,10 +1217,17 @@ function bestCorner(room: RoomRect, cw: number, cl: number): { x: number; y: num
 
 /**
  * After furniture is placed, slide any door whose swing overlaps furniture
- * along its wall to the first clear spot (bounded ±0.2, clamped 0.15–0.85).
- * The mirrored twin door on the neighbor moves with it so the pair stays
- * aligned. Deterministic; leaves the door alone when nothing clears.
+ * along its wall to the first clear spot; when sliding fails, flip the hinge
+ * (in-left ↔ in-right) so the arc clears the fixture. The mirrored twin door
+ * on the neighbor moves with it so the pair stays aligned.
  */
+function flipSwing(s: DoorMarker['swing']): DoorMarker['swing'] {
+  if (s === 'in-left') return 'in-right';
+  if (s === 'in-right') return 'in-left';
+  if (s === 'out-left') return 'out-right';
+  return 'out-left';
+}
+
 function nudgeDoorsClearOfFurniture(rooms: RoomRect[], furniture: import('../types').FurnitureItem[]): void {
   const furnByFloor = new Map<number, import('../types').FurnitureItem[]>();
   for (const f of furniture) {
@@ -1058,6 +1258,7 @@ function nudgeDoorsClearOfFurniture(rooms: RoomRect[], furniture: import('../typ
           break;
         }
       }
+      let cleared = false;
       for (const delta of [0.3, -0.3, 0.25, -0.25, 0.2, -0.2, 0.15, -0.15, 0.1, -0.1, 0.05, -0.05]) {
         const np = Math.min(0.88, Math.max(0.12, Math.round((d.pos + delta) * 100) / 100));
         if (np === d.pos) continue;
@@ -1066,9 +1267,136 @@ function nudgeDoorsClearOfFurniture(rooms: RoomRect[], furniture: import('../typ
         if (twin) {
           twin.door.pos = Math.min(0.88, Math.max(0.12, Math.round((1 - np) * 100) / 100));
         }
+        cleared = true;
         break;
       }
+      if (!cleared) {
+        // Sliding failed — flip the hinge so the swing arc clears the fixture
+        // (bathroom door swinging through the commode is the reported case).
+        const flipped = flipSwing(d.swing);
+        d.swing = flipped;
+        if (twin) twin.door.swing = flipSwing(twin.door.swing);
+        // Re-seat bathroom fixtures opposite the final door wall.
+        if (r.type === 'bathroom') reseatBathroomFixtures(r, furniture);
+      }
     }
+  }
+}
+
+/** Move bathroom fixtures (toilet) to the corner farthest from the door wall. */
+function reseatBathroomFixtures(room: RoomRect, furniture: import('../types').FurnitureItem[]): void {
+  const door = room.doors[0];
+  if (!door) return;
+  for (const f of furniture) {
+    if (f.floor !== room.floor) continue;
+    if (f.type !== 'toilet' && f.type !== 'vanity' && f.type !== 'shower' && f.type !== 'bathtub') continue;
+    const cx = f.x + f.width / 2;
+    const cy = f.y + f.length / 2;
+    if (cx < room.x || cx > room.x + room.width || cy < room.y || cy > room.y + room.length) continue;
+    const m = 0.5;
+    const corners = [
+      { x: room.x + m, y: room.y + m },
+      { x: room.x + room.width - f.width - m, y: room.y + m },
+      { x: room.x + m, y: room.y + room.length - f.length - m },
+      { x: room.x + room.width - f.width - m, y: room.y + room.length - f.length - m },
+    ];
+    // Farthest corner from the door wall wins (toilet opposite the swing).
+    const doorCx = door.wall === 'left' ? room.x : door.wall === 'right' ? room.x + room.width : room.x + door.pos * room.width;
+    const doorCy = door.wall === 'top' ? room.y : door.wall === 'bottom' ? room.y + room.length : room.y + door.pos * room.length;
+    corners.sort((a, b) => {
+      const da = Math.hypot(a.x + f.width / 2 - doorCx, a.y + f.length / 2 - doorCy);
+      const db = Math.hypot(b.x + f.width / 2 - doorCx, b.y + f.length / 2 - doorCy);
+      return db - da;
+    });
+    const swings = doorSwingRects(room);
+    for (const c of corners) {
+      const r = { x: c.x, y: c.y, w: f.width, h: f.length };
+      let overlap = 0;
+      for (const s of swings) {
+        const ix = Math.min(r.x + r.w, s.x + s.w) - Math.max(r.x, s.x);
+        const iy = Math.min(r.y + r.h, s.y + s.h) - Math.max(r.y, s.y);
+        if (ix > 0 && iy > 0) overlap += ix * iy;
+      }
+      if (overlap <= 0.01) {
+        f.x = round(c.x);
+        f.y = round(c.y);
+        return;
+      }
+    }
+    f.x = round(corners[0].x);
+    f.y = round(corners[0].y);
+  }
+}
+
+/** Guarantee a primary front entrance door on the road wall (ground floor). */
+function ensureFrontEntrance(rooms: RoomRect[], plot: PlotConfig): void {
+  const roadWall: Wall = plot.roadSide === 'north' ? 'top' : plot.roadSide === 'east' ? 'right' : plot.roadSide === 'west' ? 'left' : 'bottom';
+  const ground = rooms.filter((r) => r.floor === 0 && r.type !== 'parking');
+  if (ground.some((r) => r.doors.some((d) => d.wall === roadWall && d.width >= 3))) return;
+  const candidates = ground
+    .filter((r) => r.type === 'foyer' || r.type === 'living' || r.type === 'dining')
+    .sort((a, b) => {
+      const rank = (t: string) => (t === 'foyer' ? 0 : t === 'living' ? 1 : 2);
+      if (rank(a.type) !== rank(b.type)) return rank(a.type) - rank(b.type);
+      // Most-front room (closest to road) wins.
+      const front = (r: RoomRect) =>
+        plot.roadSide === 'south' ? r.y + r.length : plot.roadSide === 'north' ? -r.y : plot.roadSide === 'east' ? r.x + r.width : -r.x;
+      return front(b) - front(a);
+    });
+  const host = candidates[0] || [...ground].sort((a, b) => b.width * b.length - a.width * a.length)[0];
+  if (!host) return;
+  const taken = new Set(host.doors.map((d) => d.wall));
+  if (!taken.has(roadWall)) {
+    host.doors.push({ wall: roadWall, pos: 0.5, width: 3.5, swing: 'out-right' });
+  } else {
+    host.doors.push({ wall: roadWall, pos: 0.5, width: 3.5, swing: 'out-right' });
+  }
+}
+
+/** Attach one bathroom to the Master Bedroom with a private en-suite door. */
+function ensureMasterEnSuite(rooms: RoomRect[]): void {
+  const masters = rooms.filter((r) => r.name === 'Master Bedroom' || (r.type === 'bedroom' && r.name.startsWith('Master')));
+  if (masters.length === 0) return;
+  const master = masters[0];
+  const sameFloor = rooms.filter((r) => r.floor === master.floor && r.id !== master.id);
+  const baths = sameFloor.filter((r) => r.type === 'bathroom');
+  if (baths.length === 0) return;
+  const hasEnSuite = baths.some((b) => {
+    const wall = sharedWallOf(master, b);
+    return wall !== null && (master.doors.some((d) => d.wall === wall) || b.doors.some((d) => d.wall === (OPPOSITE_WALL as Record<string, Wall>)[wall]));
+  });
+  if (hasEnSuite) return;
+  // Prefer an already-adjacent bath; else swap the nearest bath with the
+  // smallest room currently adjacent to the master (never parking/living).
+  let bath = baths
+    .filter((b) => sharedWallOf(master, b) !== null)
+    .sort((a, b) => a.width * a.length - b.width * b.length)[0];
+  if (!bath) {
+    const adjacent = sameFloor.filter((r) => sharedWallOf(master, r) !== null && r.type !== 'parking' && r.type !== 'living' && r.type !== 'kitchen');
+    adjacent.sort((a, b) => a.width * a.length - b.width * b.length);
+    const victim = adjacent[0];
+    const nearest = [...baths].sort((a, b) => {
+      const da = Math.hypot(a.x - master.x, a.y - master.y);
+      const db = Math.hypot(b.x - master.x, b.y - master.y);
+      return da - db;
+    })[0];
+    if (victim && nearest) {
+      const rx = victim.x, ry = victim.y, rw = victim.width, rl = victim.length;
+      victim.x = nearest.x; victim.y = nearest.y; victim.width = nearest.width; victim.length = nearest.length;
+      nearest.x = rx; nearest.y = ry; nearest.width = rw; nearest.length = rl;
+      bath = nearest;
+    } else {
+      bath = baths[0];
+    }
+  }
+  const wall = sharedWallOf(master, bath);
+  if (!wall) return;
+  const ow = (OPPOSITE_WALL as Record<string, Wall>)[wall];
+  if (!master.doors.some((d) => d.wall === wall)) {
+    master.doors.push({ wall, pos: 0.5, width: 3, swing: 'in-right' });
+  }
+  if (!bath.doors.some((d) => d.wall === ow)) {
+    bath.doors.push({ wall: ow, pos: 0.5, width: 3, swing: 'in-right' });
   }
 }
 
@@ -1097,7 +1425,10 @@ function toScored(
 
 /** Deterministic offline fallback (no AI). Used by tests + client fallback. */
 export function generateDesignOptions(config: ProjectConfig): ScoredLayout[] {
-  return STRATEGIES.map((s) => toScored(config, s, generateLayout(config, s.strategy), { aiPlanned: false }));
+  return STRATEGIES.map((s) => {
+    const layout = generateLayout(config, s.strategy);
+    return toScored(config, s, layout, { assumptions: layout.assumptions, aiPlanned: false });
+  });
 }
 
 /**
@@ -1108,12 +1439,13 @@ export function generateAIDesignOptions(
   config: ProjectConfig,
   aiPlan: AIPlan,
 ): { designs: ScoredLayout[]; reasoning: string; assumptions: string[] } {
-  const designs = STRATEGIES.map((s) =>
-    toScored(config, s, generateLayout(config, s.strategy, aiPlan), {
+  const designs = STRATEGIES.map((s) => {
+    const layout = generateLayout(config, s.strategy, aiPlan);
+    return toScored(config, s, layout, {
       reasoning: aiPlan.reasoning,
-      assumptions: aiPlan.assumptions,
+      assumptions: [...aiPlan.assumptions, ...(layout.assumptions || [])],
       aiPlanned: true,
-    }),
-  );
+    });
+  });
   return { designs, reasoning: aiPlan.reasoning, assumptions: aiPlan.assumptions };
 }

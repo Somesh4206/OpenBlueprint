@@ -12,6 +12,7 @@ import { LayoutStrategy, ProjectConfig, RoomRequirement, RoomType } from '../typ
 import { ROOM_CATALOG } from '../room-catalog';
 import { AIConfig, AITruncatedError, chatJSON } from './provider';
 import { distributeRoomsByFloor, expandRequirements } from '../layout/engine';
+import { normalizeRequirements } from '../architecture/normalize';
 
 export interface ClarifyingQuestion {
   id: string;
@@ -117,7 +118,7 @@ export function buildPlanningContext(config: ProjectConfig, expandedNames: strin
   const floorNames = ['Ground', 'First', 'Second', 'Third', 'Fourth'];
   let floorBrief = '';
   try {
-    const byFloor = distributeRoomsByFloor(config.rooms, config.floors, config.floorAssignment);
+    const byFloor = distributeRoomsByFloor(normalizeRequirements(config.rooms).reqs, config.floors, config.floorAssignment);
     floorBrief = byFloor
       .map((reqs, f) => {
         const names = expandRequirements(reqs).map((r) => `${r.name} [${r.type}]`);
