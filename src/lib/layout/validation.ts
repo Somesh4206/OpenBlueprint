@@ -70,6 +70,26 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
         severity: 'warning',
       });
     }
+    const area = r.width * r.length;
+    const aspect = Math.max(r.width, r.length) / Math.max(0.5, Math.min(r.width, r.length));
+    if (area > cat.maxArea + 0.5) {
+      errors.push({
+        code: 'ABOVE_MAX_AREA',
+        message: `${r.name} (${Math.round(area)} sq.ft) exceeds the maximum ${cat.maxArea} sq.ft.`,
+        roomId: r.id,
+        roomName: r.name,
+        severity: 'error',
+      });
+    }
+    if (aspect > cat.maxAspect + 0.05) {
+      errors.push({
+        code: 'ABOVE_MAX_ASPECT',
+        message: `${r.name} (${r.width}' × ${r.length}') exceeds the maximum aspect ${cat.maxAspect}.`,
+        roomId: r.id,
+        roomName: r.name,
+        severity: 'error',
+      });
+    }
   }
 
   // overlap check per floor
@@ -338,12 +358,22 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
   // ---- Rule 1: Zone clustering check ----
   // Public rooms should cluster (front), private rooms cluster (rear).
   // We check that public rooms are closer to the road than private rooms on average.
-  const roadY = layout.plot.roadSide === 'south' ? layout.plot.length : layout.plot.roadSide === 'north' ? 0 : layout.plot.length / 2;
+  // ---- Rule 1: Zone clustering check ----
+  // Public rooms should cluster (front), private rooms cluster (rear).
+  // We check that public rooms are closer to the road than private rooms on average.
+  const distToRoad = (r: { x: number; y: number; width: number; length: number }) => {
+    switch (layout.plot.roadSide) {
+      case 'south': return Math.abs(layout.plot.length - (r.y + r.length / 2));
+      case 'north': return Math.abs(r.y + r.length / 2);
+      case 'east': return Math.abs(layout.plot.width - (r.x + r.width / 2));
+      case 'west': return Math.abs(r.x + r.width / 2);
+    }
+  };
   const publicRooms = layout.rooms.filter((r) => zoneOf(r.type) === 'public' && r.floor === 0);
   const privateRooms = layout.rooms.filter((r) => zoneOf(r.type) === 'private' && r.floor === 0);
   if (publicRooms.length > 0 && privateRooms.length > 0) {
-    const avgPublicDist = publicRooms.reduce((s, r) => s + Math.abs(r.y + r.length / 2 - roadY), 0) / publicRooms.length;
-    const avgPrivateDist = privateRooms.reduce((s, r) => s + Math.abs(r.y + r.length / 2 - roadY), 0) / privateRooms.length;
+    const avgPublicDist = publicRooms.reduce((s, r) => s + distToRoad(r), 0) / publicRooms.length;
+    const avgPrivateDist = privateRooms.reduce((s, r) => s + distToRoad(r), 0) / privateRooms.length;
     if (avgPrivateDist < avgPublicDist - 3) {
       warnings.push({
         code: 'ZONE_CLUSTERING',
@@ -391,13 +421,14 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
   };
 }
 
-function isOnStreetSide(r: { x: number; y: number; width: number; length: number }, plot: { width: number; length: number; roadSide: string }): boolean {
-  const tol = 0.5;
+function isOnStreetSide(r: { x: number; y: number; width: number; length: number }, plot: LayoutData['plot']): boolean {
+  const tol = 0.8;
+  const b = buildableArea(plot, 0);
   switch (plot.roadSide) {
-    case 'south': return r.y + r.length >= plot.length - tol;
-    case 'north': return r.y <= tol;
-    case 'east': return r.x + r.width >= plot.width - tol;
-    case 'west': return r.x <= tol;
+    case 'south': return r.y + r.length >= b.y + b.h - tol || r.y + r.length >= plot.length - tol;
+    case 'north': return r.y <= b.y + tol || r.y <= tol;
+    case 'east': return r.x + r.width >= b.x + b.w - tol || r.x + r.width >= plot.width - tol;
+    case 'west': return r.x <= b.x + tol || r.x <= tol;
   }
   return false;
 }
