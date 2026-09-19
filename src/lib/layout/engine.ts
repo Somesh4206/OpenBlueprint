@@ -12,7 +12,7 @@ import {
 import { ROOM_CATALOG } from '../room-catalog';
 import { scoreLayout } from './scoring';
 import { validateLayout } from './validation';
-import { allocateZones, optimizeAdjacencies, packRooms, placeZoneRooms } from '../architecture/planner';
+import { assignBands, optimizeAdjacencies, packRooms, placeZoneRooms } from '../architecture/planner';
 import { normalizeRequirements } from '../architecture/normalize';
 import { doorSwingRects, opensIntoProhibited, sharedWallOf, solveOpenings, swingRectFor } from './doors';
 
@@ -578,11 +578,45 @@ export function generateFloorLayout(
     }
   }
 
-  const clusters = allocateZones(houseRect, houseReqs, config.plot);
-  for (const c of clusters) {
-    // Same: optimize within each zone cluster, never across clusters.
-    placed.push(...optimizeAdjacencies(placeZoneRooms(c, floor, config.plot, strategy, rankOf)));
-  }
+  // Front→rear band packing (AI Context §5). Each band gets a strip of the
+  // house rect proportional to its summed preferred area; BSP runs inside
+  // each strip. Bands tile houseRect exactly (last strip takes the
+  // remainder, absorbing rounding). allocateZones stays exported for other
+  // consumers but is no longer on this path.
+  const bandGroups = assignBands(houseReqs, floor);
+  const bandPref = (r: RoomRequirement) => {
+    const cat = ROOM_CATALOG[r.type];
+    return (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
+  };
+  const bandTotals = bandGroups.map((g) => g.reqs.reduce((s, r) => s + bandPref(r), 0));
+  const bandGrand = bandTotals.reduce((a, b) => a + b, 0) || 1;
+  const horizontal = config.plot.roadSide === 'south' || config.plot.roadSide === 'north';
+  const fromHigh = config.plot.roadSide === 'south' || config.plot.roadSide === 'east';
+  let cursor = fromHigh
+    ? (horizontal ? houseRect.y + houseRect.h : houseRect.x + houseRect.w)
+    : (horizontal ? houseRect.y : houseRect.x);
+  bandGroups.forEach((g, i) => {
+    const frac = bandTotals[i] / bandGrand;
+    if (horizontal) {
+      const depth = i === bandGroups.length - 1
+        ? Math.abs(cursor - houseRect.y)
+        : Math.round(houseRect.h * frac * 2) / 2;
+      const rect: Rect = fromHigh
+        ? { x: houseRect.x, y: cursor - depth, w: houseRect.w, h: depth }
+        : { x: houseRect.x, y: cursor, w: houseRect.w, h: depth };
+      cursor += fromHigh ? -depth : depth;
+      placed.push(...optimizeAdjacencies(placeZoneRooms({ zone: 'public', rooms: g.reqs, rect }, floor, config.plot, strategy, rankOf)));
+    } else {
+      const depth = i === bandGroups.length - 1
+        ? Math.abs(cursor - houseRect.x)
+        : Math.round(houseRect.w * frac * 2) / 2;
+      const rect: Rect = fromHigh
+        ? { x: cursor - depth, y: houseRect.y, w: depth, h: houseRect.h }
+        : { x: cursor, y: houseRect.y, w: depth, h: houseRect.h };
+      cursor += fromHigh ? -depth : depth;
+      placed.push(...optimizeAdjacencies(placeZoneRooms({ zone: 'public', rooms: g.reqs, rect }, floor, config.plot, strategy, rankOf)));
+    }
+  });
 
   // Step 3: (per-group adjacency optimization already applied above)
   out.push(...placed);

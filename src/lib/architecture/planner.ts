@@ -20,6 +20,29 @@ export interface PlannerResult {
   adjacencyMap: Record<string, string[]>; // roomId → [adjacent roomIds]
 }
 
+// Front→rear band map per floor class (AI Context §5). Unmapped types fall
+// into the last band (rear/service) — deterministic, never silent.
+export const BAND_MAP: Record<string, RoomRequirement['type'][]> = {
+  'ground-entry': ['foyer', 'living'],
+  'ground-social': ['dining', 'bathroom'],
+  'ground-service': ['kitchen', 'utility', 'store'],
+  'upper-front': ['balcony', 'foyer'],
+  'upper-rear': ['bedroom', 'bathroom', 'pooja', 'office'],
+};
+
+export function assignBands(reqs: RoomRequirement[], floor: number): { band: string; reqs: RoomRequirement[] }[] {
+  const order = floor === 0
+    ? ['ground-entry', 'ground-social', 'ground-service']
+    : ['upper-front', 'upper-rear'];
+  const groups = order.map((band) => ({ band, reqs: [] as RoomRequirement[] }));
+  for (const r of reqs) {
+    if (r.type === 'parking') continue;
+    const idx = order.findIndex((b) => (BAND_MAP[b] || []).includes(r.type));
+    groups[idx < 0 ? groups.length - 1 : idx].reqs.push(r);
+  }
+  return groups.filter((g) => g.reqs.length > 0);
+}
+
 // Allocate zone regions within the buildable area.
 // public → front (near road), private → rear, service → side, circulation → center.
 export function allocateZones(
