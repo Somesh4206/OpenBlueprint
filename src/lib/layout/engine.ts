@@ -9,10 +9,11 @@ import {
   DoorMarker,
   WindowMarker,
 } from '../types';
-import { ROOM_CATALOG } from '../room-catalog';
+import { CAPPED_TYPES, ROOM_CATALOG } from '../room-catalog';
 import { scoreLayout } from './scoring';
 import { validateLayout } from './validation';
-import { assignBands, optimizeAdjacencies, packRooms, placeZoneRooms } from '../architecture/planner';
+import { assignBands, countCapViolations, MIN_BAND_DEPTH, optimizeAdjacencies, packRooms, placeZoneRooms } from '../architecture/planner';
+import { sharedWallOverlap } from '../architecture/rules';
 import { normalizeRequirements } from '../architecture/normalize';
 import { doorSwingRects, opensIntoProhibited, sharedWallOf, solveOpenings, swingRectFor } from './doors';
 
@@ -28,6 +29,7 @@ function repairGeometry(
   config: ProjectConfig,
   allRooms: RoomRect[],
   floor: number,
+  groupOf?: (id: string) => string,
 ): void {
   const others = allRooms.filter((r) => r.floor !== floor);
   const live = allRooms.filter((r) => r.floor === floor);
@@ -91,6 +93,19 @@ function repairGeometry(
       for (let j = i + 1; j < best.length; j++) {
         const a = best[i], b = best[j];
         if (a.type === 'parking' || b.type === 'parking') continue;
+        // Swaps stay inside one pack group (porch or a single band strip):
+        // cross-group swaps teleport rooms across bands and break tiling.
+        if (groupOf && groupOf(a.id) !== groupOf(b.id)) continue;
+        // Repairs must not manufacture cap violations to fix other errors:
+        // swapping living into a 4ft slot trades a door error for an aspect
+        // error and reads as a fix by raw counts. Block worsening only —
+        // swaps that reduce cap violations still proceed.
+        const beforeCaps = countCapViolations([a, b]);
+        const afterCaps = countCapViolations([
+          { type: a.type, width: b.width, length: b.length },
+          { type: b.type, width: a.width, length: a.length },
+        ]);
+        if (afterCaps > beforeCaps) continue;
         const trial = clone(best);
         const ta = trial[i], tb = trial[j];
         // swap rects (positions + sizes)
@@ -109,6 +124,65 @@ function repairGeometry(
     bestScore = diagScore(best);
   }
   writeBack(live, best);
+}
+
+/** Foyer-connectivity repair (mirrors the validator BFS). Adds paired doors
+ * from each unvisited room to an adjacent visited room until fixpoint.
+ * Bedrooms are destinations, never transit. Parking is skipped. */
+function ensureConnectivity(allRooms: RoomRect[], floor: number): void {
+  const rooms = allRooms.filter((r) => r.floor === floor);
+  const foyers = rooms.filter((r) => r.type === 'foyer');
+  if (foyers.length === 0) return;
+  const edge = (a: RoomRect, b: RoomRect): boolean => {
+    const w = sharedWallOf(a, b);
+    if (!w) return false;
+    if (a.doors.some((d) => d.wall === w)) return true;
+    const ow = OPPOSITE_WALL[w];
+    return b.doors.some((d) => d.wall === ow);
+  };
+  const visited = new Set<string>(foyers.map((f) => f.id));
+  const queue = [...foyers];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const o of rooms) {
+      if (o.id === cur.id || visited.has(o.id)) continue;
+      if (edge(cur, o)) {
+        visited.add(o.id);
+        if (o.type !== 'bedroom') queue.push(o);
+      }
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const r of rooms) {
+      if (r.type === 'parking' || visited.has(r.id)) continue;
+      const host = rooms.find((o) => visited.has(o.id) && sharedWallOf(r, o) !== null);
+      if (!host) continue;
+      const wall = sharedWallOf(r, host)!;
+      const ow = OPPOSITE_WALL[wall];
+      if (!r.doors.some((d) => d.wall === wall)) {
+        r.doors.push({ wall, pos: 0.5, width: 3, swing: 'in-right' });
+      }
+      if (!host.doors.some((d) => d.wall === ow)) {
+        host.doors.push({ wall: ow, pos: 0.5, width: 3, swing: 'in-right' });
+      }
+      visited.add(r.id);
+      if (r.type !== 'bedroom') queue.push(r);
+      // Drain the queue again: newly visited non-bedrooms unlock neighbors.
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        for (const o of rooms) {
+          if (o.id === cur.id || visited.has(o.id)) continue;
+          if (edge(cur, o)) {
+            visited.add(o.id);
+            if (o.type !== 'bedroom') queue.push(o);
+          }
+        }
+      }
+      changed = true;
+    }
+  }
 }
 
 function writeBack(live: RoomRect[], best: RoomRect[]): void {
@@ -136,9 +210,17 @@ function repairProhibitedDoors(rooms: RoomRect[]): void {
     const sameFloor = rooms.filter((o) => o.id !== r.id && o.floor === r.floor);
     for (const o of sameFloor) {
       if (!opensIntoProhibited(r.type, o.type)) continue;
-      const wall = sharedWallOf(r, o);
-      if (!wall) continue;
-      const di = r.doors.findIndex((d) => d.wall === wall);
+      const overlap = sharedWallOverlap(r, o);
+      if (!overlap) continue;
+      // Segment-aware trigger: only a door whose span intersects the shared
+      // segment opens into the neighbor (a door over the foyer part of a
+      // wall also shared with living is fine).
+      const wallLen = overlap.wall === 'top' || overlap.wall === 'bottom' ? r.width : r.length;
+      const di = r.doors.findIndex((d) => {
+        if (d.wall !== overlap.wall) return false;
+        const half = d.width / 2 / Math.max(0.5, wallLen);
+        return d.pos + half > overlap.lo && d.pos - half < overlap.hi;
+      });
       if (di < 0) continue;
       const banned = new Set<Wall>();
       for (const n of sameFloor) {
@@ -283,6 +365,19 @@ export function buildableArea(plot: PlotConfig, _floor?: number): Rect {
   }
 }
 
+// Tiled footprint for a floor: the buildable area, except upper floors sit
+// on the ground load-bearing band when ground parking is carved (no
+// habitable cantilever). Shared by the packer and the validator so area
+// conservation compares against the same rect both sides tile.
+export function floorFootprint(plot: PlotConfig, floor: number, hasGroundParking: boolean): Rect {
+  const b = buildableArea(plot, floor);
+  if (floor > 0 && hasGroundParking) {
+    const carved = carveParkingCorner(buildableArea(plot, 0), plot.roadSide);
+    if (carved) return { ...carved.house };
+  }
+  return b;
+}
+
 // ---- Strategy bias: keeps the 5 design variants distinct ----
 // Each strategy nudges within-zone ordering so variants genuinely differ
 // while all still obey zone clustering + AI anchors + hard rules.
@@ -355,10 +450,12 @@ function carveParkingCorner(
   buildable: Rect,
   roadSide: PlotConfig['roadSide'],
 ): { bay: Rect; house: Rect; porch: Rect } | null {
-  // Single car bay: 9ft wide × 18ft deep (oriented per road side).
+  // Single car bay: 10ft wide × 18ft deep (oriented per road side).
+  // 10ft is the catalog preferred parking width (fits car + bike) and leaves
+  // the porch narrow enough for a single living room within its area cap.
   const snap = (n: number) => Math.round(n * 2) / 2;
   if (roadSide === 'south' || roadSide === 'north') {
-    const bw = Math.min(12, snap(buildable.w * 0.4));
+    const bw = Math.max(10, Math.min(12, snap(buildable.w * 0.4)));
     const bd = 18;
     if (buildable.w < bw + 6 || buildable.h < bd + 8 || bw < 8) return null;
     const onSouth = roadSide === 'south';
@@ -474,15 +571,8 @@ export function generateFloorLayout(
   floorReqs: RoomRequirement[] = expandRequirements(config.rooms),
   aiPlan?: AIPlan,
 ): RoomRect[] {
-  let buildable = buildableArea(config.plot, floor);
-  // Structural: upper floors must sit on the ground load-bearing footprint.
-  // The ground carves a parking bay + porch column at the road side; an upper
-  // floor using the full buildable rect would float ~14ft over open yard.
-  // Clamp upper floors to the ground house band so no habitable room cantilevers.
-  if (floor > 0 && config.rooms.some((r) => r.type === 'parking')) {
-    const groundCarve = carveParkingCorner(buildableArea(config.plot, 0), config.plot.roadSide);
-    if (groundCarve) buildable = groundCarve.house;
-  }
+  // Tiled footprint for this floor (structural clamp for upper floors).
+  const buildable = floorFootprint(config.plot, floor, config.rooms.some((r) => r.type === 'parking'));
   let reqs = [...floorReqs];
   if (config.floors > 1) {
     reqs = ensureStaircase(reqs, config.floors);
@@ -537,6 +627,9 @@ export function generateFloorLayout(
   let placed: RoomRect[] = [];
   let porchReqs: RoomRequirement[] = [];
   let houseReqs = orderedReqs;
+  // Pack-group key per room id: repair swaps stay inside one group so rooms
+  // never teleport across bands (which breaks tiling and band order).
+  const packGroup = new Map<string, string>();
   if (porchRect) {
     const porchArea = porchRect.w * porchRect.h;
     let used = 0;
@@ -544,7 +637,10 @@ export function generateFloorLayout(
     for (const r of orderedReqs) {
       const cat = ROOM_CATALOG[r.type];
       const pa = (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
-      const isPublic = cat.group === 'public' || cat.group === 'circulation';
+      // The foyer belongs to the house entry band (as door buffer), never the
+      // porch: a 6x6 foyer cannot share the porch rect without stranding as
+      // a sliver, and the entry sequence runs porch -> foyer -> living.
+      const isPublic = (cat.group === 'public' || cat.group === 'circulation') && r.type !== 'foyer';
       if (isPublic && used + pa <= porchArea * 1.15) {
         porchReqs.push(r);
         used += pa;
@@ -553,14 +649,29 @@ export function generateFloorLayout(
       }
     }
     // BOND: kitchen and dining must stay together (serving link). If the
-    // porch/house split separated them, move the straggler to rejoin its
-    // partner. This prevents dining ending up next to parking while the
-    // kitchen sits on the opposite side of the house.
+    // porch/house split separated them, prefer keeping the pair in the porch
+    // (a big porch hosts the social core well); otherwise pull the straggler
+    // back to the house. This prevents dining ending up next to parking
+    // while the kitchen sits on the opposite side of the house.
     const porchHasDining = porchReqs.some((r) => r.type === 'dining');
     const porchHasKitchen = porchReqs.some((r) => r.type === 'kitchen');
     const restHasDining = rest.some((r) => r.type === 'dining');
     const restHasKitchen = rest.some((r) => r.type === 'kitchen');
-    if (porchHasDining && restHasKitchen) {
+    const kitchenPa = (() => {
+      const k = rest.find((r) => r.type === 'kitchen');
+      if (!k) return 0;
+      const cat = ROOM_CATALOG[k.type];
+      return (k.preferredWidth || cat.preferredWidth) * (k.preferredLength || cat.preferredLength);
+    })();
+    if (porchHasDining && restHasKitchen && used + kitchenPa <= porchArea * 1.15) {
+      // Kitchen joins dining in the porch — the pair stays together by the road.
+      const kitchen = rest.filter((r) => r.type === 'kitchen');
+      for (const k of kitchen) {
+        rest.splice(rest.indexOf(k), 1);
+        porchReqs.push(k);
+        used += kitchenPa / Math.max(1, kitchen.length);
+      }
+    } else if (porchHasDining && restHasKitchen) {
       // Dining is in porch, kitchen is in house — pull dining back to house
       const dining = porchReqs.filter((r) => r.type === 'dining');
       porchReqs = porchReqs.filter((r) => r.type !== 'dining');
@@ -574,7 +685,9 @@ export function generateFloorLayout(
     houseReqs = rest;
     if (porchReqs.length > 0) {
       // Optimize within the porch group only — never across pack areas.
-      placed.push(...optimizeAdjacencies(packRooms(porchRect, porchReqs, floor)));
+      const porchRooms = optimizeAdjacencies(packRooms(porchRect, porchReqs, floor));
+      for (const r of porchRooms) packGroup.set(r.id, 'porch');
+      placed.push(...porchRooms);
     }
   }
 
@@ -583,43 +696,143 @@ export function generateFloorLayout(
   // each strip. Bands tile houseRect exactly (last strip takes the
   // remainder, absorbing rounding). allocateZones stays exported for other
   // consumers but is no longer on this path.
-  const bandGroups = assignBands(houseReqs, floor);
+  // Bands always stack as full-width horizontal strips. The house spans the
+  // full buildable width on every road side, so every strip's left/right
+  // walls are external (habitable-window invariant holds by construction).
+  // Vertical strips would strand middle-strip rooms with no external wall.
+  // Order is front→rear on north/south roads; top→bottom on east/west where
+  // every strip touches the road edge along its full width.
+  const fromHigh = config.plot.roadSide === 'south' || config.plot.roadSide === 'east';
   const bandPref = (r: RoomRequirement) => {
     const cat = ROOM_CATALOG[r.type];
     return (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
   };
-  const bandTotals = bandGroups.map((g) => g.reqs.reduce((s, r) => s + bandPref(r), 0));
+  let bandGroups = assignBands(houseReqs, floor);
+  // Ribbon guard: a band strip must be deep enough for its members' aspect
+  // needs (capped room types: sqrt of clamped target area over max aspect),
+  // and never under MIN_BAND_DEPTH. Too-thin bands merge into a neighbor
+  // instead of manufacturing slivers. The merged rooms pack together via BSP.
+  const needDim = (r: RoomRequirement): number => {
+    const cat = ROOM_CATALOG[r.type];
+    if (CAPPED_TYPES.has(r.type)) {
+      const target = Math.min(bandPref(r), cat.maxArea);
+      return Math.sqrt(target / cat.maxAspect);
+    }
+    return Math.sqrt(((r.minWidth || cat.minWidth) * (r.minLength || cat.minLength)) / 2);
+  };
+  // Clamped sums: members never need more than their caps (capped types) or
+  // prefs, so strips sized past the clamped sum would only flood someone.
+  const bandSize = (r: RoomRequirement): number => {
+    const cat = ROOM_CATALOG[r.type];
+    return CAPPED_TYPES.has(r.type) ? Math.min(bandPref(r), cat.maxArea) : bandPref(r);
+  };
+  // A band with no capped members can never violate caps. On upper floors it
+  // keeps its own strip: the stair lobby must span full width to touch every
+  // bedroom (distribution hall with private doors). On the ground the foyer
+  // merges into the entry/social bands where 4-room granularity splits
+  // better. Other bands merge when thinner than their aspect needs.
+  const hasCapped = (g: { reqs: RoomRequirement[] }) => g.reqs.some((r) => CAPPED_TYPES.has(r.type));
+  // Uncapped-only strips need just door/landing workability (3.5ft swing):
+  // 4ft, not the full MIN_BAND_DEPTH.
+  const HALL_DEPTH = 4;
+  for (let pass = 0; pass < 3 && bandGroups.length > 1; pass++) {
+    const total = bandGroups.reduce((s, g) => s + g.reqs.reduce((a, r) => a + bandSize(r), 0), 0) || 1;
+    const thin = bandGroups.findIndex((g) => {
+      if (!hasCapped(g) && floor > 0) return false;
+      const need = Math.max(MIN_BAND_DEPTH, ...g.reqs.map(needDim));
+      return (houseRect.h * g.reqs.reduce((a, r) => a + bandSize(r), 0)) / total < need;
+    });
+    if (thin < 0) break;
+    const victim = bandGroups.splice(thin, 1)[0];
+    const host = bandGroups[Math.min(thin, bandGroups.length - 1)];
+    host.reqs.push(...victim.reqs);
+  }
+  const bandTotals = bandGroups.map((g) => g.reqs.reduce((s, r) => s + bandSize(r), 0));
   const bandGrand = bandTotals.reduce((a, b) => a + b, 0) || 1;
-  const horizontal = config.plot.roadSide === 'south' || config.plot.roadSide === 'north';
-  const fromHigh = config.plot.roadSide === 'south' || config.plot.roadSide === 'east';
-  let cursor = fromHigh
-    ? (horizontal ? houseRect.y + houseRect.h : houseRect.x + houseRect.w)
-    : (horizontal ? houseRect.y : houseRect.x);
+  const bandClamped = [...bandTotals];
+  let cursor = fromHigh ? houseRect.y + houseRect.h : houseRect.y;
+  // Far edge: leftover past the last clamped strip becomes the garden below;
+  // strips plus garden tile the rect exactly.
+  const farEdge = fromHigh ? houseRect.y : houseRect.y + houseRect.h;
+  // Walk first, place after: clamped strips may leave a rear remainder. When
+  // it fits a usable garden (>= 6x6 and >= 48 sqft) it becomes open-to-sky
+  // balcony space; otherwise the last strip absorbs it (no void ever).
+  // Uncapped-only bands (hall/passage circulation) are boosted to a workable
+  // HALL_DEPTH hall when later bands still fit their needs after the boost;
+  // otherwise they keep their share (best effort, flagged honestly).
+  const groupNeed = bandGroups.map((g) =>
+    hasCapped(g) ? Math.max(MIN_BAND_DEPTH, ...g.reqs.map(needDim)) : HALL_DEPTH,
+  );
+  const stripRects: Rect[] = [];
+  let walkEnd = cursor;
   bandGroups.forEach((g, i) => {
     const frac = bandTotals[i] / bandGrand;
-    if (horizontal) {
-      const depth = i === bandGroups.length - 1
-        ? Math.abs(cursor - houseRect.y)
-        : Math.round(houseRect.h * frac * 2) / 2;
-      const rect: Rect = fromHigh
-        ? { x: houseRect.x, y: cursor - depth, w: houseRect.w, h: depth }
-        : { x: houseRect.x, y: cursor, w: houseRect.w, h: depth };
-      cursor += fromHigh ? -depth : depth;
-      placed.push(...optimizeAdjacencies(placeZoneRooms({ zone: 'public', rooms: g.reqs, rect }, floor, config.plot, strategy, rankOf)));
-    } else {
-      const depth = i === bandGroups.length - 1
-        ? Math.abs(cursor - houseRect.x)
-        : Math.round(houseRect.w * frac * 2) / 2;
-      const rect: Rect = fromHigh
-        ? { x: cursor - depth, y: houseRect.y, w: depth, h: houseRect.h }
-        : { x: cursor, y: houseRect.y, w: depth, h: houseRect.h };
-      cursor += fromHigh ? -depth : depth;
-      placed.push(...optimizeAdjacencies(placeZoneRooms({ zone: 'public', rooms: g.reqs, rect }, floor, config.plot, strategy, rankOf)));
+    const shareDepth = Math.round(houseRect.h * frac * 2) / 2;
+    const clampDepth = bandClamped[i] / Math.max(1, houseRect.w);
+    let depth = Math.min(shareDepth, clampDepth);
+    if (!hasCapped(g) && depth < HALL_DEPTH) {
+      const laterReserve = bandGroups
+        .slice(i + 1)
+        .reduce((s, _h, j) => s + Math.max(
+          Math.round(houseRect.h * (bandTotals[i + 1 + j] / bandGrand) * 2) / 2,
+          groupNeed[i + 1 + j],
+        ), 0);
+      const spaceLeft = houseRect.h - Math.abs(walkEnd - cursor);
+      depth = Math.min(HALL_DEPTH, Math.max(depth, spaceLeft - laterReserve));
+      if (depth < shareDepth) depth = shareDepth;
     }
+    const rect: Rect = fromHigh
+      ? { x: houseRect.x, y: walkEnd - depth, w: houseRect.w, h: depth }
+      : { x: houseRect.x, y: walkEnd, w: houseRect.w, h: depth };
+    stripRects.push(rect);
+    walkEnd += fromHigh ? -depth : depth;
   });
+  const remnant = houseRect.h - stripRects.reduce((s, r) => s + r.h, 0);
+  const gardenViable = houseRect.w >= 6 && remnant >= 6 && houseRect.w * remnant >= 48;
+  if (!gardenViable && stripRects.length > 0) {
+    // Absorb the remnant into the last strip (today's behaviour): extend it
+    // from its packed edge out to the far edge, keeping its placed edge.
+    const last = stripRects[stripRects.length - 1];
+    if (fromHigh) {
+      last.h = last.y + last.h - farEdge;
+      last.y = farEdge;
+    } else {
+      last.h = farEdge - last.y;
+    }
+  }
+  bandGroups.forEach((g, i) => {
+    const rect = stripRects[i];
+    const bandRooms = optimizeAdjacencies(placeZoneRooms({ zone: 'public', rooms: g.reqs, rect }, floor, config.plot, strategy, rankOf));
+    for (const r of bandRooms) packGroup.set(r.id, `band-${g.band}`);
+    placed.push(...bandRooms);
+    cursor += fromHigh ? -rect.h : rect.h;
+  });
+  if (gardenViable) {
+    // NOTE: walkEnd (post-walk cursor), NOT cursor: the placement loop below
+    // has not run yet, so cursor still holds the walk start. Using cursor
+    // here sizes the garden to the full house and overlaps every strip.
+    const gh = round(Math.abs(walkEnd - farEdge));
+    const garden: RoomRect = {
+      id: genId(),
+      type: 'balcony',
+      name: floor === 0 ? 'Garden' : 'Terrace',
+      x: round(houseRect.x),
+      y: round(fromHigh ? farEdge : walkEnd),
+      width: round(houseRect.w),
+      length: gh,
+      floor,
+      doors: [],
+      windows: [],
+    };
+    packGroup.set(garden.id, 'band-garden');
+    placed.push(garden);
+  }
 
   // Step 3: (per-group adjacency optimization already applied above)
   out.push(...placed);
+  if (process.env.LAYOUT_DEBUG === '1') {
+    for (const r of out.filter((x) => x.floor === floor)) console.error(`[layout-debug] packed f${floor} ${r.type}:${r.name} ${r.width}x${r.length} @(${r.x},${r.y})`);
+  }
 
   // Step 3b: Vastu lock — kitchen (fire) must never sit in SW (earth). When
   // enabled, swap a SW kitchen with an SE occupant (or NW fallback).
@@ -632,7 +845,14 @@ export function generateFloorLayout(
     config.plot,
   );
   for (const r of out) {
-    if (r.type === 'parking') continue;
+    if (r.type === 'parking') {
+      // Banded parking (carve infeasible on narrow plots) never saw the door
+      // solver, which skips parking: give it the road shutter directly.
+      if (r.doors.length === 0) {
+        r.doors.push({ wall: roadWallSide({ x: r.x, y: r.y, w: r.width, h: r.length }, config.plot), pos: 0.5, width: 10, swing: 'out-right' });
+      }
+      continue;
+    }
     const o = openings.get(r.id);
     if (o) {
       r.doors = o.doors;
@@ -645,10 +865,16 @@ export function generateFloorLayout(
   repairProhibitedDoors(out.filter((r) => r.floor === floor));
 
   // Step 6: Swap-repair against the REAL validator — while the diagnosis
-  // score improves, try pairwise rect swaps (tiling preserved: the rect set
-  // is only permuted, so no void and no overlap can ever result; parking
-  // never moves). Score = hard errors first, then ballooning, then warnings.
-  repairGeometry(config, out, floor);
+  // score improves, try pairwise rect swaps within one pack group (tiling
+  // preserved: the rect set is only permuted, so no void and no overlap can
+  // ever result; parking never moves). Score = hard errors first, then
+  // ballooning, then warnings.
+  repairGeometry(config, out, floor, (id) => packGroup.get(id) ?? 'bay');
+
+  // Step 7: Connectivity — BFS from the foyer over door edges (bedrooms are
+  // sinks). Every unvisited room adjacent to the visited set gets a paired
+  // door on the shared wall, to fixpoint. Parking is entered from the road.
+  ensureConnectivity(out, floor);
 
   return out;
 }
@@ -1275,6 +1501,22 @@ function nudgeDoorsClearOfFurniture(rooms: RoomRect[], furniture: import('../typ
         f.x < s.x + s.w && f.x + f.width > s.x && f.y < s.y + s.h && f.y + f.length > s.y,
     );
   };
+  // True when the door leaf at `pos` would open into a prohibited neighbor's
+  // wall segment. Nudge slides must not trade a furniture overlap for a
+  // hygiene/privacy violation (bath door sliding from the foyer segment onto
+  // the living segment of one shared wall).
+  const opensProhibited = (room: RoomRect, wall: Wall, pos: number, leafWidth: number): boolean => {
+    const wallLen = wall === 'top' || wall === 'bottom' ? room.width : room.length;
+    const half = leafWidth / 2 / Math.max(0.5, wallLen);
+    for (const n of rooms) {
+      if (n.id === room.id || n.floor !== room.floor) continue;
+      if (!opensIntoProhibited(room.type, n.type)) continue;
+      const overlap = sharedWallOverlap(room, n);
+      if (!overlap || overlap.wall !== wall) continue;
+      if (pos + half > overlap.lo && pos - half < overlap.hi) return true;
+    }
+    return false;
+  };
   for (const r of rooms) {
     if (r.type === 'parking' || r.type === 'staircase') continue;
     for (const d of r.doors) {
@@ -1297,6 +1539,7 @@ function nudgeDoorsClearOfFurniture(rooms: RoomRect[], furniture: import('../typ
         const np = Math.min(0.88, Math.max(0.12, Math.round((d.pos + delta) * 100) / 100));
         if (np === d.pos) continue;
         if (overlapsAny(r, d.wall, np)) continue;
+        if (opensProhibited(r, d.wall, np, d.width)) continue;
         d.pos = np;
         if (twin) {
           twin.door.pos = Math.min(0.88, Math.max(0.12, Math.round((1 - np) * 100) / 100));

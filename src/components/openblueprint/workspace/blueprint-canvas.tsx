@@ -321,15 +321,16 @@ export function BlueprintCanvas({
       const w = snap(Math.max(4, r.width + dx));
       patch = { width: Math.min(w, plot.width - r.x) };
     } else if (drag.mode === 'resize-notch') {
-      // Dragging the inner vertex of an L-shape or T-shape room
-      // This changes both notchW and notchL simultaneously
-      const newNotchW = snap(Math.max(2, Math.min(r.width - 4, r.width - dx)));
-      const newNotchL = snap(Math.max(2, Math.min(r.length - 4, r.length - dy)));
+      const baseW = drag.startRoom?.notchW ?? (r.width * 0.4);
+      const baseL = drag.startRoom?.notchL ?? (r.length * 0.4);
+      const newNotchW = snap(Math.max(2, Math.min(r.width - 4, baseW - dx)));
+      const newNotchL = snap(Math.max(2, Math.min(r.length - 4, baseL - dy)));
       patch = { notchW: newNotchW, notchL: newNotchL };
     } else if (drag.mode === 'resize-notch2') {
-      // Dragging the LEFT inner vertex of a T-shape (only affects notchW on left side)
-      const newNotchW = snap(Math.max(2, Math.min(r.width - 4, r.width - dx)));
-      const newNotchL = snap(Math.max(2, Math.min(r.length - 4, r.length - dy)));
+      const baseW = drag.startRoom?.notchW ?? (r.width * 0.4);
+      const baseL = drag.startRoom?.notchL ?? (r.length * 0.4);
+      const newNotchW = snap(Math.max(2, Math.min(r.width - 4, baseW + dx)));
+      const newNotchL = snap(Math.max(2, Math.min(r.length - 4, baseL - dy)));
       patch = { notchW: newNotchW, notchL: newNotchL };
     }
     onUpdateRoom(drag.roomId!, patch);
@@ -438,19 +439,25 @@ export function BlueprintCanvas({
         />
 
         {/* Setback area */}
-        {config.plot.setbackFront + config.plot.setbackRear + config.plot.setbackSides > 0 && (
-          <rect
-            x={originX + config.plot.setbackSides * scale}
-            y={originY + config.plot.setbackRear * scale}
-            width={(plot.width - config.plot.setbackSides * 2) * scale}
-            height={(plot.length - config.plot.setbackFront - config.plot.setbackRear) * scale}
-            fill="none"
-            stroke={accentColor}
-            strokeWidth={1}
-            strokeDasharray="6 4"
-            opacity={0.5}
-          />
-        )}
+        {config.plot.setbackFront + config.plot.setbackRear + config.plot.setbackSides > 0 && (() => {
+          const sbLeft = config.plot.roadSide === 'west' ? config.plot.setbackFront : config.plot.setbackSides;
+          const sbRight = config.plot.roadSide === 'east' ? config.plot.setbackFront : config.plot.setbackSides;
+          const sbTop = config.plot.roadSide === 'north' ? config.plot.setbackFront : config.plot.roadSide === 'south' ? config.plot.setbackRear : config.plot.setbackSides;
+          const sbBottom = config.plot.roadSide === 'south' ? config.plot.setbackFront : config.plot.roadSide === 'north' ? config.plot.setbackRear : config.plot.setbackSides;
+          return (
+            <rect
+              x={originX + sbLeft * scale}
+              y={originY + sbTop * scale}
+              width={(plot.width - sbLeft - sbRight) * scale}
+              height={(plot.length - sbTop - sbBottom) * scale}
+              fill="none"
+              stroke={accentColor}
+              strokeWidth={1}
+              strokeDasharray="6 4"
+              opacity={0.5}
+            />
+          );
+        })()}
 
         {/* Rooms */}
         {visibleRooms.map((room) => (
@@ -490,7 +497,7 @@ export function BlueprintCanvas({
           ))}
 
         {/* North arrow */}
-        <NorthArrow originX={originX + plotW - 24} originY={originY + 20} accent={accentColor} />
+        <NorthArrow originX={originX + plotW - 24} originY={originY + 20} accent={accentColor} northDirection={plot.northDirection} />
 
         {/* Scale bar */}
         <g transform={`translate(${originX}, ${originY + plotH + 16})`}>
@@ -503,18 +510,18 @@ export function BlueprintCanvas({
         {/* Dimensions on plot edges */}
         {showDims && (
           <>
-            <text x={originX + plotW / 2} y={originY - 8} textAnchor="middle" fontSize={11} fill="#1f2a3a" className="tech-num" fontWeight={600}>
+            <text x={originX + plotW / 2} y={originY - 20} textAnchor="middle" fontSize={11} fill="#1f2a3a" className="tech-num" fontWeight={600}>
               {plot.width} {plot.unit}
             </text>
             <text
-              x={originX - 12}
+              x={originX - 22}
               y={originY + plotH / 2}
               textAnchor="middle"
               fontSize={11}
               fill="#1f2a3a"
               className="tech-num"
               fontWeight={600}
-              transform={`rotate(-90 ${originX - 12} ${originY + plotH / 2})`}
+              transform={`rotate(-90 ${originX - 22} ${originY + plotH / 2})`}
             >
               {plot.length} {plot.unit}
             </text>
@@ -744,16 +751,18 @@ function RoomShape({
         const dims = `${fmt(room.width)} × ${fmt(room.length)}`;
         const dimsFs = fitFont(dims, Math.max(8, Math.min(10, rw / 12)), 7);
         const dimsFit = showDims && rl > 44 && dims.length * dimsFs * 0.6 <= maxW;
-        if (!label && !dimsFit) return null;
+        // Parking label sits above the car hood; bedroom labels sit in the top
+        // third so a centered double bed never covers the room text.
+        const centerY = room.type === 'parking' ? ry + 18 : room.type === 'bedroom' ? ry + rl * 0.32 : ry + rl / 2;
         return (
           <>
             {label && (
-              <text x={rx + rw / 2} y={ry + rl / 2 - (dimsFit ? 2 : -3)} textAnchor="middle" fontSize={label === room.name ? nameFs : shortFs} fontWeight={600} fill="#1f2a3a" pointerEvents="none" stroke="rgba(255,255,255,0.9)" strokeWidth={3} style={{ paintOrder: 'stroke' }}>
+              <text x={rx + rw / 2} y={centerY - (dimsFit ? 2 : -3)} textAnchor="middle" fontSize={label === room.name ? nameFs : shortFs} fontWeight={600} fill="#1f2a3a" pointerEvents="none" stroke="rgba(255,255,255,0.9)" strokeWidth={3} style={{ paintOrder: 'stroke' }}>
                 {label}
               </text>
             )}
             {dimsFit && (
-              <text x={rx + rw / 2} y={ry + rl / 2 + (label ? 13 : 4)} textAnchor="middle" fontSize={dimsFs} fill="#5b6678" className="tech-num" pointerEvents="none" stroke="rgba(255,255,255,0.9)" strokeWidth={3} style={{ paintOrder: 'stroke' }}>
+              <text x={rx + rw / 2} y={centerY + (label ? 13 : 4)} textAnchor="middle" fontSize={dimsFs} fill="#5b6678" className="tech-num" pointerEvents="none" stroke="rgba(255,255,255,0.9)" strokeWidth={3} style={{ paintOrder: 'stroke' }}>
                 {dims}
               </text>
             )}
@@ -952,12 +961,14 @@ function RoadIndicator({ plot, originX, originY, plotW, plotH, accent }: { plot:
   }
 }
 
-function NorthArrow({ originX, originY, accent }: { originX: number; originY: number; accent: string }) {
+function NorthArrow({ originX, originY, accent, northDirection = 0 }: { originX: number; originY: number; accent: string; northDirection?: number }) {
   return (
     <g transform={`translate(${originX}, ${originY})`} pointerEvents="none">
       <circle cx={0} cy={0} r={14} fill="white" stroke="#1f2a3a" strokeWidth={1} />
-      <path d="M 0 -10 L -4 6 L 0 3 L 4 6 Z" fill={accent} stroke={accent} />
-      <text x={0} y={-16} textAnchor="middle" fontSize={9} fontWeight={700} fill="#1f2a3a">N</text>
+      <g transform={`rotate(${northDirection})`}>
+        <path d="M 0 -10 L -4 6 L 0 3 L 4 6 Z" fill={accent} stroke={accent} />
+        <text x={0} y={-14} textAnchor="middle" fontSize={8} fontWeight={700} fill="#1f2a3a">N</text>
+      </g>
     </g>
   );
 }
@@ -1013,37 +1024,34 @@ function FurnitureShape({
 }) {
   const cat = FURNITURE_MAP[item.type];
   const color = item.color || cat?.color || '#999';
-  // bounding box after rotation
-  const rotated = item.rotation === 90 || item.rotation === 270;
-  const bw = (rotated ? item.length : item.width) * scale;
-  const bl = (rotated ? item.width : item.length) * scale;
+  const uw = item.width * scale;
+  const ul = item.length * scale;
   // center in screen coords
   const cx = originX + (item.x + item.width / 2) * scale;
   const cy = originY + (item.y + item.length / 2) * scale;
-  const tx = cx - bw / 2;
-  const ty = cy - bl / 2;
 
   const opacity = dimmed ? 0.4 : 1;
-  // scale factor from the 100×100 symbol viewBox to the furniture's pixel size
-  const sx = (item.width * scale) / 100;
-  const sy = (item.length * scale) / 100;
+  const sx = uw / 100;
+  const sy = ul / 100;
 
   return (
-    <g style={{ opacity, cursor: 'move', pointerEvents: 'all' } as React.CSSProperties} transform={`translate(${tx} ${ty}) rotate(${item.rotation} ${bw / 2} ${bl / 2})`}>
-      {/* invisible hit area covering the bounding box — receives all pointer events.
-          Use fillOpacity 0.02 (above browser threshold for pointer events) */}
+    <g
+      style={{ opacity, cursor: 'move', pointerEvents: 'all' } as React.CSSProperties}
+      transform={`translate(${cx} ${cy}) rotate(${item.rotation || 0})`}
+    >
+      {/* invisible hit area covering the bounding box — receives all pointer events */}
       <rect
         data-furniture-id={item.id}
-        x={0}
-        y={0}
-        width={bw}
-        height={bl}
+        x={-uw / 2}
+        y={-ul / 2}
+        width={uw}
+        height={ul}
         fill="white"
         fillOpacity={0.02}
         style={{ pointerEvents: 'all' }}
       />
-      {/* the symbol — pointer-events: none so clicks pass through to the hit area */}
-      <g transform={`scale(${sx} ${sy})`} style={{ pointerEvents: 'none' }}>
+      {/* the symbol — centered at (-uw/2, -ul/2) */}
+      <g transform={`translate(${-uw / 2} ${-ul / 2}) scale(${sx} ${sy})`} style={{ pointerEvents: 'none' }}>
         <svg viewBox="0 0 100 100" width={100} height={100} style={{ overflow: 'visible', pointerEvents: 'none' }}>
           <FurnitureSymbol type={item.type} color={color} className="w-full h-full" />
         </svg>
@@ -1051,22 +1059,44 @@ function FurnitureShape({
       {/* selection outline + handles */}
       {selected && (
         <>
-          <rect x={-2} y={-2} width={bw + 4} height={bl + 4} fill="none" stroke={accentColor} strokeWidth={1.5} strokeDasharray="4 2" style={{ pointerEvents: 'none' }} />
+          <rect
+            x={-uw / 2 - 2}
+            y={-ul / 2 - 2}
+            width={uw + 4}
+            height={ul + 4}
+            fill="none"
+            stroke={accentColor}
+            strokeWidth={1.5}
+            strokeDasharray="4 2"
+            style={{ pointerEvents: 'none' }}
+          />
           {/* resize handle (bottom-right corner) — drag to resize */}
-          <g data-furniture-id={item.id} data-furniture-handle="resize" style={{ cursor: 'nwse-resize', pointerEvents: 'all' } as React.CSSProperties}>
-            <rect x={bw - 6} y={bl - 6} width={12} height={12} fill={accentColor} stroke="white" strokeWidth={1.5} rx={2} />
-            <line x1={bw - 2} y1={bl - 2} x2={bw + 2} y2={bl + 2} stroke="white" strokeWidth={1} />
+          <g
+            data-furniture-id={item.id}
+            data-furniture-handle="resize"
+            style={{ cursor: 'nwse-resize', pointerEvents: 'all' } as React.CSSProperties}
+          >
+            <rect x={uw / 2 - 6} y={ul / 2 - 6} width={12} height={12} fill={accentColor} stroke="white" strokeWidth={1.5} rx={2} />
+            <line x1={uw / 2 - 2} y1={ul / 2 - 2} x2={uw / 2 + 2} y2={ul / 2 + 2} stroke="white" strokeWidth={1} />
           </g>
           {/* rotate handle (top-right) */}
-          <g data-furniture-id={item.id} data-furniture-handle="rotate" style={{ cursor: 'grab', pointerEvents: 'all' } as React.CSSProperties}>
-            <circle cx={bw + 14} cy={-14} r={8} fill={accentColor} stroke="white" strokeWidth={1.5} />
-            <path d={`M ${bw + 10} -14 A 4 4 0 1 1 ${bw + 18} -14`} fill="none" stroke="white" strokeWidth={1.2} />
+          <g
+            data-furniture-id={item.id}
+            data-furniture-handle="rotate"
+            style={{ cursor: 'grab', pointerEvents: 'all' } as React.CSSProperties}
+          >
+            <circle cx={uw / 2 + 14} cy={-ul / 2 - 14} r={8} fill={accentColor} stroke="white" strokeWidth={1.5} />
+            <path d={`M ${uw / 2 + 10} ${-ul / 2 - 14} A 4 4 0 1 1 ${uw / 2 + 18} ${-ul / 2 - 14}`} fill="none" stroke="white" strokeWidth={1.2} />
           </g>
           {/* delete handle (top-left) */}
-          <g data-furniture-id={item.id} data-furniture-handle="delete" style={{ cursor: 'pointer', pointerEvents: 'all' } as React.CSSProperties}>
-            <circle cx={-14} cy={-14} r={8} fill="#dc2626" stroke="white" strokeWidth={1.5} />
-            <line x1={-17} y1={-17} x2={-11} y2={-11} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
-            <line x1={-11} y1={-17} x2={-17} y2={-11} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+          <g
+            data-furniture-id={item.id}
+            data-furniture-handle="delete"
+            style={{ cursor: 'pointer', pointerEvents: 'all' } as React.CSSProperties}
+          >
+            <circle cx={-uw / 2 - 14} cy={-ul / 2 - 14} r={8} fill="#dc2626" stroke="white" strokeWidth={1.5} />
+            <line x1={-uw / 2 - 17} y1={-ul / 2 - 17} x2={-uw / 2 - 11} y2={-ul / 2 - 11} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
+            <line x1={-uw / 2 - 11} y1={-ul / 2 - 17} x2={-uw / 2 - 17} y2={-ul / 2 - 11} stroke="white" strokeWidth={1.5} strokeLinecap="round" />
           </g>
         </>
       )}

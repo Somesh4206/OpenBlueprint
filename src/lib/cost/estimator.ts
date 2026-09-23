@@ -39,7 +39,28 @@ const FINISH_MULT: Record<FinishGrade, number> = {
 };
 
 export function computeBuiltUpArea(layout: LayoutData): number {
-  return Math.round(layout.rooms.reduce((s, r) => s + r.width * r.length, 0));
+  const rawArea = layout.rooms.reduce((s, r) => s + r.width * r.length, 0);
+  const sqftArea = layout.plot.unit === 'm' ? rawArea * 10.76391 : rawArea;
+  return Math.round(sqftArea);
+}
+
+export function computeBuiltUpAreaByFloor(layout: LayoutData): number[] {
+  const out: number[] = Array.from({ length: Math.max(1, layout.floors) }, () => 0);
+  for (const r of layout.rooms) {
+    const raw = r.width * r.length;
+    const sqft = layout.plot.unit === 'm' ? raw * 10.76391 : raw;
+    if (r.floor >= 0 && r.floor < out.length) out[r.floor] += sqft;
+  }
+  return out.map((a) => Math.round(a));
+}
+
+export function computeFAR(layout: LayoutData): number {
+  const plotArea =
+    layout.plot.unit === 'm'
+      ? layout.plot.width * layout.plot.length * 10.76391
+      : layout.plot.width * layout.plot.length;
+  if (plotArea <= 0) return 0;
+  return Math.round((computeBuiltUpArea(layout) / plotArea) * 100) / 100;
 }
 
 export function estimateCost(
@@ -52,8 +73,7 @@ export function estimateCost(
   const mult =
     FLOORING_MULT[materials.flooring] *
     DOOR_MULT[materials.doors] *
-    WINDOW_MULT[materials.windows] *
-    FINISH_MULT[finish];
+    WINDOW_MULT[materials.windows];
   const ratePerSqft = Math.round(base * mult);
   const total = Math.round(area * ratePerSqft);
 

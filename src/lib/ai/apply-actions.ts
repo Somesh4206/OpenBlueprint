@@ -159,20 +159,20 @@ function relocateRoom(room: RoomRect, plot: { width: number; length: number }, l
     case 'side':
       x = Math.max(0, Math.min(plot.width - w, room.x === 0 ? 1 : plot.width - w - 1));
       break;
-    case 'sw': // South-West (top-right in our coords where y-down = south)
+    case 'sw': // South-West (bottom-left)
+      x = 1;
+      y = Math.max(0, plot.length - l - 1);
+      break;
+    case 'se': // South-East (bottom-right)
       x = Math.max(0, plot.width - w - 1);
       y = Math.max(0, plot.length - l - 1);
       break;
-    case 'se': // South-East (top-left)
-      x = 1;
-      y = Math.max(0, plot.length - l - 1);
-      break;
-    case 'ne': // North-East (bottom-left)
-      x = 1;
+    case 'ne': // North-East (top-right)
+      x = Math.max(0, plot.width - w - 1);
       y = 1;
       break;
-    case 'nw': // North-West (bottom-right)
-      x = Math.max(0, plot.width - w - 1);
+    case 'nw': // North-West (top-left)
+      x = 1;
       y = 1;
       break;
     case 'center':

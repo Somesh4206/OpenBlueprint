@@ -5,16 +5,14 @@ import {
   ValidationIssue,
   ValidationResult,
 } from '../types';
-import { ROOM_CATALOG } from '../room-catalog';
-import { Rect, rectsOverlap, rectWithin, buildableArea } from './engine';
-import { doorSwingRects, opensIntoProhibited, sharedWallOf } from './doors';
+import { CAPPED_TYPES, ROOM_CATALOG } from '../room-catalog';
+import { Rect, rectsOverlap, rectWithin, buildableArea, floorFootprint } from './engine';
+import { doorSwingRects, opensIntoProhibited } from './doors';
 import type { RoomRect } from '../types';
 
-/** True when `room` has a door on the wall it shares with `other`. */
+/** True when `room` has a door whose span intersects `other`'s wall overlap. */
 function doorOpensInto(room: RoomRect, other: RoomRect): boolean {
-  const wall = sharedWallOf(room, other);
-  if (!wall) return false;
-  return room.doors.some((d) => d.wall === wall);
+  return doorOpensIntoSegment(room, other);
 }
 import {
   DESIRED_ADJACENCY,
@@ -23,6 +21,7 @@ import {
   PRIMARY_ROOM_MIN_AREA,
   PROHIBITIONS,
   areAdjacent,
+  doorOpensIntoSegment,
   zoneOf,
   ZONE_PLACEMENT,
 } from '../architecture/rules';
@@ -70,6 +69,9 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
         severity: 'warning',
       });
     }
+    // Absolute caps apply only to the AI Context §6 table types. Foyers,
+    // lobbies, dining and service rooms are circulation or support space.
+    if (!CAPPED_TYPES.has(r.type)) continue;
     const area = r.width * r.length;
     const aspect = Math.max(r.width, r.length) / Math.max(0.5, Math.min(r.width, r.length));
     if (area > cat.maxArea + 0.5) {
@@ -203,7 +205,9 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
         }
       }
       for (const r of rooms) {
-        if (r.type === 'foyer' || visited.has(r.id)) continue;
+        // Parking is entered from the road and balconies/gardens from their
+        // adjoining room — never via the foyer diagram.
+        if (r.type === 'foyer' || r.type === 'parking' || r.type === 'balcony' || visited.has(r.id)) continue;
         errors.push({
           code: 'FOYER_UNREACHABLE',
           message: `${r.name} is not reachable from the foyer without crossing a bedroom.`,
@@ -226,8 +230,10 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
         });
       }
     }
-    // Area conservation against the buildable footprint (rooms tile it).
-    const b = buildableArea(layout.plot, floor);
+    // Area conservation against the tiled footprint for this floor (upper
+    // floors sit on the ground house band when ground parking is carved).
+    const hasGroundParking = layout.rooms.some((r) => r.type === 'parking' && r.floor === 0);
+    const b = floorFootprint(layout.plot, floor, hasGroundParking);
     const footprint = b.w * b.h;
     const sum = rooms.reduce((s, r) => s + r.width * r.length, 0);
     const mismatch = footprint > 0 ? Math.abs(sum - footprint) / footprint : 0;

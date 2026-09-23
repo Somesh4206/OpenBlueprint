@@ -145,10 +145,10 @@ export const INDIAN_ROOM_NORMS: Record<string, IndianRoomNorm> = {
 
 // Vastu direction → quadrant mapping (cultural preference)
 export const VASTU_QUADRANTS = {
-  NE: { label: 'North-East', x: [0, 0.5], y: [0, 0.5] }, // sacred, pooja, entrance
-  NW: { label: 'North-West', x: [0, 0.5], y: [0.5, 1] }, // parking, bathroom
-  SE: { label: 'South-East', x: [0.5, 1], y: [0, 0.5] }, // kitchen (Agni)
-  SW: { label: 'South-West', x: [0.5, 1], y: [0.5, 1] }, // master bedroom, staircase
+  NE: { label: 'North-East', x: [0.5, 1], y: [0, 0.5] }, // sacred, pooja, entrance (top-right)
+  NW: { label: 'North-West', x: [0, 0.5], y: [0, 0.5] }, // bathroom, utility (top-left)
+  SE: { label: 'South-East', x: [0.5, 1], y: [0.5, 1] }, // kitchen (Agni) (bottom-right)
+  SW: { label: 'South-West', x: [0, 0.5], y: [0.5, 1] }, // master bedroom, staircase (bottom-left)
   N: { label: 'North', x: [0, 1], y: [0, 0.3] }, // entrance, living
   E: { label: 'East', x: [0.7, 1], y: [0, 1] }, // entrance
   S: { label: 'South', x: [0, 1], y: [0.7, 1] }, // heavy rooms
@@ -278,11 +278,11 @@ export function vastuScore(roomType: string, x: number, y: number, width: number
   const norm = INDIAN_ROOM_NORMS[roomType] || INDIAN_ROOM_NORMS[roomType.replace('-', '')];
   if (!norm?.vastuDirection) return 0.5; // neutral
   const dir = norm.vastuDirection;
-  // check quadrant
-  if (dir.includes('South-West') && cx > 0.5 && cy > 0.5) return 1;
-  if (dir.includes('South-East') && cx > 0.5 && cy < 0.5) return 1;
-  if (dir.includes('North-East') && cx < 0.5 && cy < 0.5) return 1;
-  if (dir.includes('North-West') && cx < 0.5 && cy > 0.5) return 1;
+  // check quadrant (plot coords: x=0 west, x=1 east, y=0 north/top, y=1 south/bottom)
+  if (dir.includes('South-West') && cx < 0.5 && cy > 0.5) return 1;
+  if (dir.includes('South-East') && cx > 0.5 && cy > 0.5) return 1;
+  if (dir.includes('North-East') && cx > 0.5 && cy < 0.5) return 1;
+  if (dir.includes('North-West') && cx < 0.5 && cy < 0.5) return 1;
   if (dir === 'East' && cx > 0.6) return 1;
   if (dir === 'North' && cy < 0.4) return 1;
   if (dir === 'South' && cy > 0.6) return 1;

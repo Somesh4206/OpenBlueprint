@@ -9,6 +9,7 @@ export interface RenderOptions {
   showDoors?: boolean;
   showWindows?: boolean;
   showNorth?: boolean;
+  showFurniture?: boolean;
   floor?: number | 'all';
   scale?: number; // px per unit
   accentColor?: string;
@@ -30,6 +31,7 @@ export function renderBlueprintSVG(layout: LayoutData, opts: RenderOptions = {})
   const showDoors = opts.showDoors ?? true;
   const showWindows = opts.showWindows ?? true;
   const showNorth = opts.showNorth ?? true;
+  const showFurniture = opts.showFurniture ?? true;
   const blueprintMode = opts.blueprintMode ?? false;
   const compact = opts.compact ?? false;
 
@@ -97,7 +99,7 @@ export function renderBlueprintSVG(layout: LayoutData, opts: RenderOptions = {})
 
     if (showLabels && rw > 40 && rl > 30) {
       const cx = rx + rw / 2;
-      const cy = ry + rl / 2;
+      const cy = room.type === 'parking' ? ry + 18 : room.type === 'bedroom' ? ry + rl * 0.32 : ry + rl / 2;
       const nameSize = compact ? 9 : 11;
       const dimSize = compact ? 7 : 9;
       parts.push(
@@ -124,13 +126,40 @@ export function renderBlueprintSVG(layout: LayoutData, opts: RenderOptions = {})
     }
   }
 
+  // furniture
+  if (showFurniture && !compact && layout.furniture) {
+    const furn = layout.furniture.filter(
+      (f) => opts.floor === undefined || opts.floor === 'all' || f.floor === opts.floor,
+    );
+    for (const item of furn) {
+      const fx = padding + item.x * scale;
+      const fy = padding + item.y * scale;
+      const fw = item.width * scale;
+      const fl = item.length * scale;
+      const cx = fx + fw / 2;
+      const cy = fy + fl / 2;
+      const fStroke = blueprintMode ? '#93c5fd' : '#475569';
+      const fFill = blueprintMode ? 'rgba(147,197,253,0.15)' : 'rgba(100,116,139,0.12)';
+      const rot = item.rotation || 0;
+      parts.push(`<g transform="rotate(${rot} ${cx} ${cy})">`);
+      parts.push(`<rect x="${fx}" y="${fy}" width="${fw}" height="${fl}" rx="${Math.min(4, fw / 6)}" fill="${fFill}" stroke="${fStroke}" stroke-width="1.2"/>`);
+      if (fw > 20 && fl > 16) {
+        parts.push(`<text x="${cx}" y="${cy + 3}" text-anchor="middle" font-size="${Math.min(8, Math.max(6, fw / 5))}" fill="${fStroke}" opacity="0.8">${escapeXml(item.name)}</text>`);
+      }
+      parts.push(`</g>`);
+    }
+  }
+
   // north arrow
   if (showNorth && !compact) {
     const nx = padding + plot.width * scale - 30;
     const ny = padding + 18;
+    const rot = plot.northDirection ?? 0;
+    parts.push(`<g transform="rotate(${rot} ${nx} ${ny})">`);
     parts.push(`<circle cx="${nx}" cy="${ny}" r="14" fill="none" stroke="${textColor}" stroke-width="1"/>`);
     parts.push(`<path d="M ${nx} ${ny - 10} L ${nx - 5} ${ny + 6} L ${nx} ${ny + 2} L ${nx + 5} ${ny + 6} Z" fill="${accent}" stroke="${accent}"/>`);
     parts.push(`<text x="${nx}" y="${ny + 22}" text-anchor="middle" font-size="9" font-weight="700" fill="${textColor}">N</text>`);
+    parts.push(`</g>`);
   }
 
   // scale bar

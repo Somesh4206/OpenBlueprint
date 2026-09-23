@@ -964,14 +964,18 @@ function FloorDistributionDialog({
           const hasFoyer = config.rooms.some((x) => x.type === 'foyer');
           if (r.type === 'bathroom' && !hasParking && hasFoyer && floors > 1) {
             arr[0] = 1;
-            const rest = r.count - 1;
+            let rest = r.count - 1;
             for (let f = 1; f < floors && rest > 0; f++) {
-              arr[f] = Math.ceil(rest / (floors - f));
+              const allocated = Math.min(rest, Math.ceil(rest / (floors - f)));
+              arr[f] = allocated;
+              rest -= allocated;
             }
           } else {
-            const rest = r.count;
+            let rest = r.count;
             for (let f = 1; f < floors && rest > 0; f++) {
-              arr[f] = Math.ceil(rest / (floors - f));
+              const allocated = Math.min(rest, Math.ceil(rest / (floors - f)));
+              arr[f] = allocated;
+              rest -= allocated;
             }
           }
         }

@@ -59,7 +59,7 @@ function desiredNeighbors(type: RoomType): RoomType[] {
     case 'kitchen': return ['dining', 'living', 'foyer'];
     case 'dining': return ['kitchen', 'living', 'foyer'];
     case 'living': return ['foyer', 'dining', 'kitchen'];
-    case 'foyer': return ['living', 'dining'];
+    case 'foyer': return ['living', 'dining', 'bedroom'];
     case 'bedroom': return ['bathroom', 'foyer', 'living', 'dining'];
     case 'bathroom': return ['bedroom', 'foyer', 'office'];
     case 'pooja': return ['living', 'dining', 'foyer', 'bedroom'];

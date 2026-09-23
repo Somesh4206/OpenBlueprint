@@ -232,6 +232,11 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
   },
 };
 
+// Room types with absolute area/aspect caps (AI Context §6 table exactly).
+// All other types are uncapped: the packer still clamps their targets, but
+// the validator does not fail them (foyers and lobbies are circulation).
+export const CAPPED_TYPES: Set<RoomType> = new Set(['bedroom', 'bathroom', 'kitchen', 'living']);
+
 export const TYPICAL_ROOM_TYPES: RoomType[] = (Object.keys(ROOM_CATALOG) as RoomType[]).filter(
   (t) => ROOM_CATALOG[t].typical,
 );

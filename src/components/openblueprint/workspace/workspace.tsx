@@ -75,7 +75,7 @@ import { BlueprintCanvas } from './blueprint-canvas';
 import { AiAssistant } from './ai-assistant';
 import { ToolPanel } from './tool-panel';
 import { ValidationPanel } from './panels';
-import { computeBuiltUpArea, estimateCost, formatINR } from '@/lib/cost/estimator';
+import { computeBuiltUpArea, computeBuiltUpAreaByFloor, computeFAR, estimateCost, formatINR } from '@/lib/cost/estimator';
 import { validateLayout } from '@/lib/layout/engine';
 import { generateInsights } from '@/lib/ai/apply-actions';
 import { genId } from '@/lib/layout/engine';
@@ -134,7 +134,8 @@ export function Workspace({ config, design, projectId }: Props) {
   const [showLabels3d, setShowLabels3d] = useState(true);
   const [cameraView, setCameraView] = useState<'orbit' | 'top' | 'front' | 'isometric'>('isometric');
   const [zoom, setZoom] = useState(1);
-  const [projectName, setProjectName] = useState('My 30×40 Home');
+  const [projectName, setProjectName] = useState('My Blueprint');
+  const displayName = projectName.trim() ? projectName : 'My Blueprint';
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' } | null>(null);
@@ -176,6 +177,11 @@ export function Workspace({ config, design, projectId }: Props) {
   const insights: DesignInsight[] = useMemo(() => generateInsights(layout, config), [layout, config]);
   const cost: CostEstimate = useMemo(() => estimateCost(layout, finish, materials), [layout, finish, materials]);
   const builtUp = computeBuiltUpArea(layout);
+  const builtUpByFloor = useMemo(() => computeBuiltUpAreaByFloor(layout), [layout]);
+  const plotArea = layout.plot.unit === 'm'
+    ? Math.round(layout.plot.width * layout.plot.length * 10.76391)
+    : Math.round(layout.plot.width * layout.plot.length);
+  const far = useMemo(() => computeFAR(layout), [layout]);
 
   function showToast(msg: string, kind: 'ok' | 'err' = 'ok') {
     setToast({ msg, kind });
@@ -220,7 +226,7 @@ export function Workspace({ config, design, projectId }: Props) {
   // save project
   const saveProject = useCallback(async () => {
     try {
-      const body = { name: projectName, config, design: { ...design, layout }, accentColor };
+      const body = { name: displayName, config, design: { ...design, layout }, accentColor };
       if (projectId) {
         await fetch(`/api/projects/${projectId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       } else {
@@ -233,7 +239,7 @@ export function Workspace({ config, design, projectId }: Props) {
     } catch {
       showToast('Save failed', 'err');
     }
-  }, [projectName, config, design, layout, accentColor, projectId, setView]);
+  }, [displayName, config, design, layout, accentColor, projectId, setView]);
 
   const selectedRoom = layout.rooms.find((r) => r.id === selectedRoomId) || null;
 
@@ -253,7 +259,9 @@ export function Workspace({ config, design, projectId }: Props) {
           <Input
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
-            className="h-8 w-40 sm:w-56 border-transparent hover:border-border focus-visible:border-border bg-transparent font-medium"
+            placeholder="My Blueprint"
+            title={displayName}
+            className="h-8 w-48 sm:w-64 border-transparent hover:border-border focus-visible:border-border bg-transparent font-medium truncate"
           />
           <Badge variant="outline" className="hidden md:inline-flex tech-num capitalize">{config.style}</Badge>
         </div>
@@ -489,7 +497,11 @@ export function Workspace({ config, design, projectId }: Props) {
                 {validation.valid ? 'Layout valid' : `${validation.errors.length} issue(s)`}
               </span>
               <Separator orientation="vertical" className="h-4" />
-              <span className="text-muted-foreground tech-num">Area: <b className="text-foreground">{builtUp.toLocaleString()} sq.ft</b></span>
+              <span className="text-muted-foreground tech-num" title={`Ground: ${(builtUpByFloor[0] || 0).toLocaleString()} sq.ft${builtUpByFloor[1] !== undefined ? ` · Upper: ${(builtUpByFloor[1] || 0).toLocaleString()} sq.ft` : ''} · Plot: ${plotArea.toLocaleString()} sq.ft · FAR: ${far}`}>
+                {builtUpByFloor.length > 1
+                  ? <>Ground: <b className="text-foreground">{(builtUpByFloor[0] || 0).toLocaleString()}</b> · Upper: <b className="text-foreground">{(builtUpByFloor[1] || 0).toLocaleString()}</b> · Total: <b className="text-foreground">{builtUp.toLocaleString()} sq.ft</b> <span className="hidden lg:inline">(Plot: {plotArea.toLocaleString()} · FAR: {far})</span></>
+                  : <>Area: <b className="text-foreground">{builtUp.toLocaleString()} sq.ft</b> <span className="hidden lg:inline">(Plot: {plotArea.toLocaleString()} · FAR: {far})</span></>}
+              </span>
               <Separator orientation="vertical" className="h-4 hidden sm:block" />
               <span className="text-muted-foreground hidden sm:inline tech-num">Rooms: <b className="text-foreground">{layout.rooms.length}</b></span>
             </div>
@@ -570,7 +582,7 @@ export function Workspace({ config, design, projectId }: Props) {
       </div>
 
       {/* Export modal */}
-      <ExportModal open={exportOpen} onOpenChange={setExportOpen} layout={layout} config={config} projectName={projectName} finish={finish} materials={materials} accentColor={accentColor} showToast={showToast} />
+      <ExportModal open={exportOpen} onOpenChange={setExportOpen} layout={layout} config={config} projectName={displayName} finish={finish} materials={materials} accentColor={accentColor} showToast={showToast} />
     </div>
   );
 }
@@ -619,6 +631,9 @@ function SpaceAnalysis({ layout, config, builtUp, selectedRoom }: { layout: Layo
   const openArea = Math.max(0, plotArea - builtUp);
   const utilization = plotArea > 0 ? Math.round((builtUp / plotArea) * 100) : 0;
   const roomCount = layout.rooms.length;
+  const byFloor = computeBuiltUpAreaByFloor(layout);
+  const far = computeFAR(layout);
+  const floorLabels = ['Ground', 'First', 'Second', 'Third'];
 
   return (
     <div className="space-y-4">
@@ -626,7 +641,10 @@ function SpaceAnalysis({ layout, config, builtUp, selectedRoom }: { layout: Layo
         <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><Layers className="size-4 text-cyan" /> Space Analysis</h3>
         <div className="space-y-2">
           <StatRow label="Plot Area" value={`${plotArea.toLocaleString()} sq.ft`} />
-          <StatRow label="Built-up Area" value={`${builtUp.toLocaleString()} sq.ft`} highlight />
+          {byFloor.map((a, i) => (
+            <StatRow key={i} label={`${floorLabels[i] || `Floor ${i + 1}`} Floor`} value={`${a.toLocaleString()} sq.ft`} />
+          ))}
+          <StatRow label="Total Built-up" value={`${builtUp.toLocaleString()} sq.ft (FAR: ${far})`} highlight />
           <StatRow label="Open Area" value={`${openArea.toLocaleString()} sq.ft`} />
           <StatRow label="Space Utilization" value={`${utilization}%`} />
           <StatRow label="Rooms" value={`${roomCount}`} />

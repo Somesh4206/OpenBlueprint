@@ -34,7 +34,18 @@ export function ExportModal({ open, onOpenChange, layout, config, projectName, f
     setBuilding(true);
     try {
       if (type === 'json') {
-        const data = JSON.stringify({ project: { name: projectName }, plot: layout.plot, floors: layout.floors, rooms: layout.rooms }, null, 2);
+        const data = JSON.stringify(
+          {
+            project: { name: projectName },
+            plot: layout.plot,
+            floors: layout.floors,
+            rooms: layout.rooms,
+            furniture: layout.furniture || [],
+            strategy: layout.strategy,
+          },
+          null,
+          2,
+        );
         download(new Blob([data], { type: 'application/json' }), `${slug(projectName)}.json`);
         showToast('JSON exported');
       } else if (type === 'svg') {

@@ -25,6 +25,8 @@ import { motion } from 'framer-motion';
 import { ProjectConfig, ScoredLayout, LayoutData } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
+import { scoreLayout } from '@/lib/layout/scoring';
+
 interface SavedProject {
   id: string;
   name: string;
@@ -39,6 +41,8 @@ interface SavedProject {
 
 export function Dashboard() {
   const setView = useApp((s) => s.setView);
+  const setCurrentDesign = useApp((s) => s.setCurrentDesign);
+  const setCurrentLayout = useApp((s) => s.setCurrentLayout);
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -70,16 +74,19 @@ export function Dashboard() {
       setView({ name: 'wizard' });
       return;
     }
+    const score = scoreLayout(p.layout, p.config);
     const design: ScoredLayout = {
       id: p.id,
-      name: 'Saved Design',
+      name: p.name || 'Saved Design',
       strategy: p.layout.strategy,
       tagline: 'Restored',
       layout: p.layout,
-      score: { total: 0, spaceUtilization: 0, circulation: 0, ventilation: 0, requirementMatch: 0, dimensionValidity: 0, simplicity: 0 },
+      score,
       builtUpArea: Math.round(p.layout.rooms.reduce((s, r) => s + r.width * r.length, 0)),
       roomCount: p.layout.rooms.length,
     };
+    setCurrentDesign(design);
+    setCurrentLayout(p.layout);
     setView({ name: 'workspace', projectId: p.id, config: p.config, design });
   }
 
