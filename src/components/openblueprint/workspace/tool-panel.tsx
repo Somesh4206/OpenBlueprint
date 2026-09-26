@@ -508,7 +508,7 @@ function RoomToolPanel(props: Props) {
               vastu: { entrance: null, kitchen: null, bedroom: null, pooja: null },
             };
             import('@/lib/layout/engine').then(({ generateLayout }) => {
-              const newLayout = generateLayout(config2, layout2.strategy);
+              const newLayout = generateLayout(config2, layout2.strategy ?? 'space-optimized');
               useApp.getState().setCurrentLayout(newLayout);
             });
           }}>

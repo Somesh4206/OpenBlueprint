@@ -1,4 +1,4 @@
-import { RoomType } from './types';
+import { RoomType, Sizing } from './types';
 
 export interface RoomCatalogEntry {
   type: RoomType;
@@ -13,6 +13,8 @@ export interface RoomCatalogEntry {
   // to these; validator reports ABOVE_MAX_AREA / ABOVE_MAX_ASPECT)
   maxArea: number;
   maxAspect: number;
+  // fixed rooms keep their standard size; flex rooms share leftover band area
+  sizing: Sizing;
   // color (hex) — blueprint navy family with accents per function
   color: string;
   accent: string;
@@ -32,6 +34,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 14,
     maxArea: 180,
     maxAspect: 1.6,
+    sizing: 'flex',
     color: '#dbe7f3',
     accent: '#2b4a7a',
     icon: 'bed',
@@ -48,6 +51,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 8,
     maxArea: 80,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#d6e8ec',
     accent: '#2d6b78',
     icon: 'bath',
@@ -64,6 +68,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 10,
     maxArea: 150,
     maxAspect: 1.6,
+    sizing: 'flex',
     color: '#fdeee0',
     accent: '#a85a1f',
     icon: 'chef-hat',
@@ -80,6 +85,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 16,
     maxArea: 260,
     maxAspect: 1.8,
+    sizing: 'flex',
     color: '#e6efe0',
     accent: '#4a6b2a',
     icon: 'sofa',
@@ -96,6 +102,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 12,
     maxArea: 240,
     maxAspect: 2.0,
+    sizing: 'flex',
     color: '#ece7da',
     accent: '#7a6a2a',
     icon: 'utensils',
@@ -112,6 +119,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 20,
     maxArea: 400,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#e4e4e7',
     accent: '#52525b',
     icon: 'car',
@@ -128,6 +136,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 8,
     maxArea: 80,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#e3f2e8',
     accent: '#2a8f5a',
     icon: 'trees',
@@ -144,6 +153,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 6,
     maxArea: 60,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#fbe9d6',
     accent: '#a8631f',
     icon: 'flame',
@@ -160,6 +170,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 10,
     maxArea: 200,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#e6e7f2',
     accent: '#3b3b7a',
     icon: 'briefcase',
@@ -176,6 +187,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 8,
     maxArea: 96,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#ececec',
     accent: '#6b7280',
     icon: 'washing-machine',
@@ -192,6 +204,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 12,
     maxArea: 168,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#e2e8f0',
     accent: '#475569',
     icon: 'stairs',
@@ -208,6 +221,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 6,
     maxArea: 72,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#eef0f3',
     accent: '#52525b',
     icon: 'door-open',
@@ -224,6 +238,7 @@ export const ROOM_CATALOG: Record<RoomType, RoomCatalogEntry> = {
     preferredLength: 5,
     maxArea: 50,
     maxAspect: 2.0,
+    sizing: 'fixed',
     color: '#ececec',
     accent: '#6b7280',
     icon: 'package',

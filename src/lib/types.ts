@@ -19,6 +19,32 @@ export type RoomType =
 
 export type RoomShape = 'rect' | 'l-shape' | 't-shape';
 
+// fixed rooms keep their standard size; flex rooms share leftover band area
+export type Sizing = 'fixed' | 'flex';
+
+/** One staircase per building, reserved at the same XY on every floor. */
+export interface StairCore {
+  x: number;
+  y: number;
+  width: number;
+  length: number;
+  kind: 'dog-leg' | 'straight';
+}
+
+/** A design variant: knobs the engine turns into real geometry. */
+export interface LayoutChoice {
+  mirror: boolean;
+  stairSlot: 'left' | 'center' | 'right';
+  kitchenCorner: 'rear-left' | 'rear-right';
+  bandOrder: 0 | 1;
+}
+
+/** Why the search could not produce (more) designs. */
+export interface BlockedReason {
+  rule: string;
+  message: string;
+}
+
 export interface RoomRect {
   id: string;
   type: RoomType;
@@ -185,7 +211,11 @@ export interface LayoutData {
   floors: number;
   rooms: RoomRect[];
   furniture: FurnitureItem[];
-  strategy: LayoutStrategy;
+  /** legacy: saved projects from before layout choices */
+  strategy?: LayoutStrategy;
+  stair?: StairCore;
+  choice?: LayoutChoice;
+  choiceLabel?: string;
   /** AI reasoning trace (present when generated via the AI planner). */
   reasoning?: string;
   assumptions?: string[];
@@ -212,7 +242,9 @@ export interface LayoutScore {
 export interface ScoredLayout {
   id: string;
   name: string;
-  strategy: LayoutStrategy;
+  /** legacy: saved projects from before layout choices */
+  strategy?: LayoutStrategy;
+  choice?: LayoutChoice;
   tagline: string;
   layout: LayoutData;
   score: LayoutScore;
