@@ -118,7 +118,7 @@ export function buildPlanningContext(config: ProjectConfig, expandedNames: strin
   const floorNames = ['Ground', 'First', 'Second', 'Third', 'Fourth'];
   let floorBrief = '';
   try {
-    const byFloor = distributeRoomsByFloor(normalizeRequirements(config.rooms).reqs, config.floors, config.floorAssignment);
+    const byFloor = distributeRoomsByFloor(normalizeRequirements(config.rooms, config.preferences).reqs, config.floors, config.floorAssignment);
     floorBrief = byFloor
       .map((reqs, f) => {
         const names = expandRequirements(reqs).map((r) => `${r.name} [${r.type}]`);

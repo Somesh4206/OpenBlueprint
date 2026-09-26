@@ -124,7 +124,6 @@ export const TEMPLATES: ProjectTemplate[] = [
       mkRoom('living', 'Living Room', 1, 16, 18, 'high'),
       mkRoom('dining', 'Dining', 1, 11, 13, 'medium'),
       mkRoom('parking', 'Parking', 1, 10, 20, 'medium'),
-      mkRoom('balcony', 'Balcony', 1, 5, 8, 'low'),
       mkRoom('office', 'Office', 1, 10, 10, 'low'),
     ],
     preview: [
@@ -191,7 +190,6 @@ export const TEMPLATES: ProjectTemplate[] = [
       mkRoom('bedroom', 'Bedroom', 4, 13, 15, 'high'),
       mkRoom('bathroom', 'Bathroom', 4, 8, 8, 'medium'),
       mkRoom('parking', 'Parking', 1, 12, 20, 'medium'),
-      mkRoom('balcony', 'Balcony', 2, 6, 10, 'low'),
       mkRoom('pooja', 'Pooja Room', 1, 6, 6, 'low'),
       mkRoom('office', 'Office', 1, 11, 12, 'low'),
     ],

@@ -1033,7 +1033,7 @@ function applyPlanFloors(byFloor: RoomRequirement[][], plan: AIPlan, floors: num
 
 export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy, aiPlan?: AIPlan): LayoutData {
   const rooms: RoomRect[] = [];
-  const normalized = normalizeRequirements(config.rooms);
+  const normalized = normalizeRequirements(config.rooms, config.preferences);
   const byFloor = distributeRoomsByFloor(normalized.reqs, config.floors, config.floorAssignment);
   if (aiPlan) applyPlanFloors(byFloor, aiPlan, config.floors);
   for (let f = 0; f < config.floors; f++) {
@@ -1072,7 +1072,7 @@ export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy, 
     furniture,
     strategy,
     reasoning: aiPlan?.reasoning,
-    assumptions: normalized.assumptions,
+    assumptions: [],
   };
 }
 

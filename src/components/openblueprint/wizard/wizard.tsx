@@ -35,6 +35,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ALL_ROOM_TYPES, ROOM_CATALOG } from '@/lib/room-catalog';
 import { RoomRequirement, RoomType, PreferenceKey, DesignStyle, ScoredLayout, ProjectConfig } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
+import { normalizeRequirements, RoomSuggestion } from '@/lib/architecture/normalize';
 
 const STEPS = [
   { id: 0, name: 'Plot Details', icon: Ruler },
@@ -65,6 +67,19 @@ export function Wizard() {
   const setWizardConfig = useApp((s) => s.setWizardConfig);
   const [step, setStep] = useState(0);
   const [showFloorDialog, setShowFloorDialog] = useState(false);
+  // Suggested rooms (foyer, dining) are pre-ticked; the user can untick them.
+  // Only ticked suggestions enter the plan — nothing is added silently.
+  const [declined, setDeclined] = useState<RoomSuggestion['type'][]>([]);
+  const suggestions = normalizeRequirements(wizardConfig.rooms, wizardConfig.preferences).suggestions;
+  const toggleSuggestion = (t: RoomSuggestion['type']) =>
+    setDeclined((d) => (d.includes(t) ? d.filter((x) => x !== t) : [...d, t]));
+  const configWithSuggestions = (): ProjectConfig => ({
+    ...wizardConfig,
+    rooms: [
+      ...wizardConfig.rooms,
+      ...suggestions.filter((s) => !declined.includes(s.type)).map((s) => s.requirement),
+    ],
+  });
 
   function next() {
     if (step < 3) setStep(step + 1);
@@ -91,7 +106,8 @@ export function Wizard() {
     // held the STALE config — floorAssignment never reached the API, so the
     // user's floor choices were silently ignored. This was the reported bug.
     if (assignment) setWizardConfig({ floorAssignment: assignment });
-    const config = assignment ? { ...wizardConfig, floorAssignment: assignment } : wizardConfig;
+    const base = configWithSuggestions();
+    const config = assignment ? { ...base, floorAssignment: assignment } : base;
     // The design-options screen performs the real AI-first fetch (with key,
     // clarification, and error states). Just navigate — it handles the rest.
     setView({
@@ -157,7 +173,7 @@ export function Wizard() {
           {step === 0 && <PlotStep key="plot" config={wizardConfig} setConfig={setWizardConfig} />}
           {step === 1 && <RoomsStep key="rooms" config={wizardConfig} setConfig={setWizardConfig} />}
           {step === 2 && <PreferencesStep key="prefs" config={wizardConfig} setConfig={setWizardConfig} />}
-          {step === 3 && <GenerateStep key="gen" config={wizardConfig} onGenerate={generate} />}
+          {step === 3 && <GenerateStep key="gen" config={wizardConfig} onGenerate={generate} suggestions={suggestions} declined={declined} onToggleSuggestion={toggleSuggestion} />}
         </AnimatePresence>
       </main>
 
@@ -182,7 +198,7 @@ export function Wizard() {
       {/* Human-in-the-loop floor distribution dialog */}
       {showFloorDialog && (
         <FloorDistributionDialog
-          config={wizardConfig}
+          config={configWithSuggestions()}
           onConfirm={(floorAssignment) => doGenerate(floorAssignment)}
           onCancel={() => setShowFloorDialog(false)}
         />
@@ -546,9 +562,9 @@ function RoomsStep({ config, setConfig }: { config: ProjectConfig; setConfig: (c
 
   const BHK_PRESETS: { label: string; hint: string; rooms: RoomType[] }[] = [
     { label: '1 BHK', hint: 'Compact', rooms: ['bedroom', 'bathroom', 'kitchen', 'living'] },
-    { label: '2 BHK', hint: 'Family', rooms: ['bedroom', 'bedroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining', 'balcony'] },
-    { label: '3 BHK', hint: 'Popular', rooms: ['bedroom', 'bedroom', 'bedroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining', 'parking', 'balcony', 'pooja'] },
-    { label: '4 BHK', hint: 'Large', rooms: ['bedroom', 'bedroom', 'bedroom', 'bedroom', 'bathroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining', 'parking', 'balcony', 'pooja', 'office'] },
+    { label: '2 BHK', hint: 'Family', rooms: ['bedroom', 'bedroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining'] },
+    { label: '3 BHK', hint: 'Popular', rooms: ['bedroom', 'bedroom', 'bedroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining', 'parking', 'pooja'] },
+    { label: '4 BHK', hint: 'Large', rooms: ['bedroom', 'bedroom', 'bedroom', 'bedroom', 'bathroom', 'bathroom', 'bathroom', 'kitchen', 'living', 'dining', 'parking', 'pooja', 'office'] },
   ];
 
   const grouped = {
@@ -867,14 +883,26 @@ function PreferencesStep({ config, setConfig }: { config: ProjectConfig; setConf
 // NOTE: this step is review + a single button. The REAL AI run happens once,
 // on the design-options screen (with live progress, doubts and errors).
 // The old fake planning animation here made it look like the AI ran twice.
-function GenerateStep({ config, onGenerate }: { config: ProjectConfig; onGenerate: () => void }) {
+function GenerateStep({
+  config,
+  onGenerate,
+  suggestions,
+  declined,
+  onToggleSuggestion,
+}: {
+  config: ProjectConfig;
+  onGenerate: () => void;
+  suggestions: RoomSuggestion[];
+  declined: RoomSuggestion['type'][];
+  onToggleSuggestion: (t: RoomSuggestion['type']) => void;
+}) {
   const totalRooms = config.rooms.reduce((s, r) => s + r.count, 0);
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="max-w-2xl mx-auto">
       <Badge variant="secondary" className="mb-2 tech-num text-[10px] mx-auto flex w-fit">STEP 04 / 04</Badge>
       <h2 className="text-2xl font-bold mb-1 text-center" style={{ fontFamily: 'var(--font-display)' }}>Ready when you are</h2>
       <p className="text-muted-foreground mb-8 text-sm text-center">
-        Review everything below. One click sends it all to the AI — it reasons about zoning, adjacency and doors, draws 5 plan options, and asks you first if anything conflicts.
+        Review everything below. One click sends it all to the AI — it reasons about zoning, adjacency and doors, draws 3–5 distinct plan options, and asks you first if anything conflicts.
         {config.floors > 1 && ' Since this is multi-floor, you’ll confirm the room-per-floor split first.'}
       </p>
 
@@ -897,11 +925,33 @@ function GenerateStep({ config, onGenerate }: { config: ProjectConfig; onGenerat
         </div>
       </Card>
 
+      {suggestions.length > 0 && (
+        <Card className="p-6 mb-6">
+          <h3 className="text-sm font-semibold mb-1">Suggested rooms</h3>
+          <p className="text-xs text-muted-foreground mb-3">Recommended for this plan. Untick any you don’t want — only ticked rooms are added.</p>
+          <div className="space-y-3">
+            {suggestions.map((s) => {
+              const id = `suggest-${s.type}`;
+              return (
+                <div key={s.type} className="flex items-start gap-3">
+                  <Checkbox id={id} checked={!declined.includes(s.type)} onCheckedChange={() => onToggleSuggestion(s.type)} className="mt-0.5" />
+                  <label htmlFor={id} className="text-sm cursor-pointer">
+                    <span className="font-medium">{s.requirement.name}</span>{' '}
+                    <span className="text-muted-foreground tech-num">{s.requirement.preferredWidth}×{s.requirement.preferredLength} ft</span>
+                    <span className="block text-xs text-muted-foreground">{s.reason}</span>
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       <div className="text-center">
         <Button size="lg" onClick={onGenerate} className="gap-2 w-full sm:w-auto">
           <Sparkles className="size-4" /> Generate My Blueprints
         </Button>
-        <p className="text-xs text-muted-foreground mt-3">5 AI-reasoned variants — usually 10–30 seconds.</p>
+        <p className="text-xs text-muted-foreground mt-3">3–5 distinct variants — usually 10–30 seconds.</p>
       </div>
     </motion.div>
   );
