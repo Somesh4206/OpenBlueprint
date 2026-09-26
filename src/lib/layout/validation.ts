@@ -69,20 +69,30 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
         severity: 'warning',
       });
     }
-    // Absolute caps apply only to the AI Context §6 table types. Foyers,
-    // lobbies, dining and service rooms are circulation or support space.
-    if (!CAPPED_TYPES.has(r.type)) continue;
     const area = r.width * r.length;
     const aspect = Math.max(r.width, r.length) / Math.max(0.5, Math.min(r.width, r.length));
-    if (area > cat.maxArea + 0.5) {
-      errors.push({
-        code: 'ABOVE_MAX_AREA',
-        message: `${r.name} (${Math.round(area)} sq.ft) exceeds the maximum ${cat.maxArea} sq.ft.`,
+    // Area cap: FLEX rooms (living, bedroom, dining, kitchen) absorb the
+    // floor's leftover area so no gap is ever left, so one above its cap is a
+    // proportion warning. A FIXED room above its cap is a real defect: the
+    // leftover landed in a bathroom or a stair lobby instead. Fixed types
+    // outside CAPPED_TYPES (foyer, store, utility, pooja, parking) are checked
+    // too -- exempting them is how an Upper Lobby reached 200 sq.ft vs a 72 cap.
+    const flex = cat.sizing === 'flex';
+    if ((CAPPED_TYPES.has(r.type) || !flex) && area > cat.maxArea + 0.5) {
+      const entry = {
+        code: 'ABOVE_MAX_AREA' as const,
+        message: flex
+          ? `${r.name} (${Math.round(area)} sq.ft) is larger than the usual maximum ${cat.maxArea} sq.ft, having absorbed the floor's spare area.`
+          : `${r.name} (${Math.round(area)} sq.ft) exceeds the maximum ${cat.maxArea} sq.ft.`,
         roomId: r.id,
         roomName: r.name,
-        severity: 'error',
-      });
+        severity: (flex ? 'warning' : 'error') as 'warning' | 'error',
+      };
+      if (flex) warnings.push(entry);
+      else errors.push(entry);
     }
+    // Aspect stays scoped to CAPPED_TYPES; see the note in task6_sev.cjs.
+    if (!CAPPED_TYPES.has(r.type)) continue;
     if (aspect > cat.maxAspect + 0.05) {
       errors.push({
         code: 'ABOVE_MAX_ASPECT',
