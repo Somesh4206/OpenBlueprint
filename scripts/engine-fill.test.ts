@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_CHOICE, floorFootprint, generateLayout } from '../src/lib/layout/engine';
+import { boundingRect, DEFAULT_CHOICE, floorFootprint, generateLayout } from '../src/lib/layout/engine';
 import type { LayoutChoice, ProjectConfig } from '../src/lib/types';
 
 const plot = {
@@ -34,14 +34,37 @@ describe('engine: choice-driven, zero-gap', () => {
       }
     }
   });
-  test('rooms tile each floor footprint with no gap', () => {
+  // Rooms must tile the slab they sit on with NO gap and NO overlap. The slab
+  // is sized to the floor's rooms, so it is deliberately smaller than the
+  // buildable envelope: the remainder is open ground, not a room. Asserting
+  // against the envelope would re-assert the pre-"size floor to rooms"
+  // contract, so the slab is checked for tiling AND confined to the envelope.
+  test('rooms tile each floor slab with no gap and no overlap', () => {
     for (const c of choices) {
       const l = generateLayout(config(), c);
       for (let f = 0; f < l.floors; f++) {
-        const fp = floorFootprint(l.plot, f, true);
         const fr = l.rooms.filter((r) => r.floor === f);
+        if (fr.length === 0) continue;
+        const slab = boundingRect(fr)!;
         const sum = fr.reduce((s, r) => s + r.width * r.length, 0);
-        expect(Math.abs(sum - fp.w * fp.h)).toBeLessThanOrEqual(0.5 * fr.length + 1);
+        // No gap: rooms fill their slab exactly.
+        expect(Math.abs(sum - slab.w * slab.h)).toBeLessThanOrEqual(0.5 * fr.length + 1);
+        // No overlap: no two rooms occupy the same ground.
+        for (let i = 0; i < fr.length; i++) {
+          for (let j = i + 1; j < fr.length; j++) {
+            const a = fr[i];
+            const b = fr[j];
+            const ow = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+            const oh = Math.min(a.y + a.length, b.y + b.length) - Math.max(a.y, b.y);
+            expect(ow > 0.01 && oh > 0.01).toBe(false);
+          }
+        }
+        // The slab never escapes the buildable envelope.
+        const env = floorFootprint(l.plot, f, true);
+        expect(slab.x).toBeGreaterThanOrEqual(env.x - 0.01);
+        expect(slab.y).toBeGreaterThanOrEqual(env.y - 0.01);
+        expect(slab.x + slab.w).toBeLessThanOrEqual(env.x + env.w + 0.01);
+        expect(slab.y + slab.h).toBeLessThanOrEqual(env.y + env.h + 0.01);
       }
     }
   });

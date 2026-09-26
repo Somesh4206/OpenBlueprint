@@ -383,17 +383,74 @@ export function buildableArea(plot: PlotConfig, _floor?: number): Rect {
   }
 }
 
-// Tiled footprint for a floor: the buildable area, except upper floors sit
-// on the ground load-bearing band when ground parking is carved (no
-// habitable cantilever). Shared by the packer and the validator so area
-// conservation compares against the same rect both sides tile.
-export function floorFootprint(plot: PlotConfig, floor: number, hasGroundParking: boolean): Rect {
-  const b = buildableArea(plot, floor);
-  if (floor > 0 && hasGroundParking) {
-    const carved = carveParkingCorner(buildableArea(plot, 0), plot.roadSide);
-    if (carved) return { ...carved.house };
+/**
+ * Structural envelope for a floor: the full buildable area. The slab actually
+ * built inside it is sized to the floor's rooms — see `builtRect`.
+ *
+ * Upper floors used to be shrunk to the band behind the ground parking bay
+ * ("no habitable cantilever"), which left a 30x40 G+1 with 768 sq ft on the
+ * ground and only 336 upstairs — 100% subscribed, so packing had to emit
+ * 24x1.5 ft ribbons. Covered parking sits UNDER the first floor on columns in
+ * a standard Indian G+1, so every floor shares one envelope.
+ */
+export function floorFootprint(plot: PlotConfig, floor: number, _hasGroundParking?: boolean): Rect {
+  return buildableArea(plot, floor);
+}
+
+/** Circulation allowance on top of the rooms' own area (corridors, walls). */
+const CIRCULATION_ALLOWANCE = 1.15;
+/** A slab shallower than this cannot hold a usable band. */
+const MIN_SLAB_DEPTH = 12;
+
+/** Area a floor's rooms need, including circulation. */
+export function floorDemand(reqs: RoomRequirement[]): number {
+  const area = reqs.reduce((s, r) => {
+    const cat = ROOM_CATALOG[r.type];
+    const pref = (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
+    // Fixed rooms never want more than their cap; flex rooms may grow a little.
+    return s + (cat.sizing === 'fixed' ? Math.min(pref, cat.maxArea) : pref);
+  }, 0);
+  return area * CIRCULATION_ALLOWANCE;
+}
+
+/**
+ * The slab actually built on a floor: `envelope` trimmed from the edge AWAY
+ * from the road until it only holds what the floor's rooms need. The road edge
+ * and full width are kept (frontage and daylight); the untouched remainder is
+ * open ground, not a room. `limit` (the floor below) keeps upper slabs
+ * supported. Never grows beyond the envelope.
+ */
+export function builtRect(
+  envelope: Rect,
+  demand: number,
+  roadSide: PlotConfig['roadSide'],
+  limit?: Rect,
+): Rect {
+  const base = limit ? intersectRect(envelope, limit) : envelope;
+  if (base.w <= 0 || base.h <= 0) return { ...base };
+  const alongY = roadSide === 'north' || roadSide === 'south';
+  const span = alongY ? base.h : base.w;
+  const cross = alongY ? base.w : base.h;
+  if (cross <= 0) return { ...base };
+  const needed = Math.max(MIN_SLAB_DEPTH, Math.ceil((demand / cross) * 2) / 2);
+  if (needed >= span) return { ...base };
+  // Keep the road edge: trim from the far side.
+  const fromHigh = roadSide === 'south' || roadSide === 'east';
+  if (alongY) {
+    return { x: base.x, y: fromHigh ? base.y + base.h - needed : base.y, w: base.w, h: needed };
   }
-  return b;
+  return { x: fromHigh ? base.x + base.w - needed : base.x, y: base.y, w: needed, h: base.h };
+}
+
+function intersectRect(a: Rect, b: Rect): Rect {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  return {
+    x,
+    y,
+    w: Math.max(0, Math.min(a.x + a.w, b.x + b.w) - x),
+    h: Math.max(0, Math.min(a.y + a.h, b.y + b.h) - y),
+  };
 }
 
 // ---- Layout choices: knobs the engine turns into real geometry ----
@@ -553,10 +610,20 @@ export function generateFloorLayout(
   floor: number,
   floorReqs: RoomRequirement[] = expandRequirements(config.rooms),
   aiPlan?: AIPlan,
+  /** slab of the floor below, so an upper slab never oversails it */
+  slabBelow?: Rect,
 ): RoomRect[] {
-  // Tiled footprint for this floor (structural clamp for upper floors).
-  const buildable = floorFootprint(config.plot, floor, config.rooms.some((r) => r.type === 'parking'));
+  // Slab for this floor: the envelope trimmed to what these rooms need, so a
+  // sparse floor is built smaller instead of ballooning its rooms. Upper
+  // slabs are clamped to the floor below (`slabBelow`) to stay supported.
+  const envelope = floorFootprint(config.plot, floor);
   let reqs = [...floorReqs];
+  const buildable = builtRect(
+    envelope,
+    floorDemand(config.floors > 1 ? ensureStaircase(reqs, config.floors) : reqs),
+    config.plot.roadSide,
+    slabBelow,
+  );
   if (config.floors > 1) {
     reqs = ensureStaircase(reqs, config.floors);
   }
@@ -691,13 +758,10 @@ export function generateFloorLayout(
     return (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
   };
   let bandGroups = assignBands(houseReqs, floor);
-  // bandOrder 1 swaps the last two bands, moving whole room groups
-  // front-to-rear (dining ahead of the kitchen instead of behind it, service
-  // behind the private band). The entry band always stays at the road.
-  if (choice.bandOrder === 1 && bandGroups.length >= 2) {
-    const n = bandGroups.length;
-    bandGroups = [...bandGroups.slice(0, n - 2), bandGroups[n - 1], bandGroups[n - 2]];
-  }
+  // NOTE: bandOrder is applied AFTER the thin-band merge below, not here.
+  // Swapping first was a no-op: the merge absorbed the swapped band into its
+  // neighbour and placeZoneRooms re-sorts rooms within a band, so bandOrder 0
+  // and 1 produced byte-identical floors.
   // Ribbon guard: a band strip must be deep enough for its members' aspect
   // needs (capped room types: sqrt of clamped target area over max aspect),
   // and never under MIN_BAND_DEPTH. Too-thin bands merge into a neighbor
@@ -716,26 +780,36 @@ export function generateFloorLayout(
     const cat = ROOM_CATALOG[r.type];
     return CAPPED_TYPES.has(r.type) ? Math.min(bandPref(r), cat.maxArea) : bandPref(r);
   };
-  // A band with no capped members can never violate caps. On upper floors it
-  // keeps its own strip: the stair lobby must span full width to touch every
-  // bedroom (distribution hall with private doors). On the ground the foyer
-  // merges into the entry/social bands where 4-room granularity splits
-  // better. Other bands merge when thinner than their aspect needs.
+  // EVERY band must be deep enough to hold a real room. The old code exempted
+  // uncapped-only bands on upper floors ("the stair lobby must span full
+  // width"), which let a 60 sq.ft lobby keep a 24x2.5 ft ribbon strip: strip
+  // depth is area/width, so a small room alone in a strip is always a ribbon.
+  // Merging it into a neighbour lets the BSP split it side-by-side instead,
+  // giving a compact room that still touches the same neighbours.
   const hasCapped = (g: { reqs: RoomRequirement[] }) => g.reqs.some((r) => CAPPED_TYPES.has(r.type));
-  // Uncapped-only strips need just door/landing workability (3.5ft swing):
-  // 4ft, not the full MIN_BAND_DEPTH.
-  const HALL_DEPTH = 4;
+  // A landing/hall still needs a usable walking depth, not just a door swing.
+  const HALL_DEPTH = 6;
   for (let pass = 0; pass < 3 && bandGroups.length > 1; pass++) {
     const total = bandGroups.reduce((s, g) => s + g.reqs.reduce((a, r) => a + bandSize(r), 0), 0) || 1;
     const thin = bandGroups.findIndex((g) => {
-      if (!hasCapped(g) && floor > 0) return false;
-      const need = Math.max(MIN_BAND_DEPTH, ...g.reqs.map(needDim));
+      const need = hasCapped(g)
+        ? Math.max(MIN_BAND_DEPTH, ...g.reqs.map(needDim))
+        : Math.max(HALL_DEPTH, ...g.reqs.map(needDim));
       return (houseRect.h * g.reqs.reduce((a, r) => a + bandSize(r), 0)) / total < need;
     });
     if (thin < 0) break;
     const victim = bandGroups.splice(thin, 1)[0];
     const host = bandGroups[Math.min(thin, bandGroups.length - 1)];
     host.reqs.push(...victim.reqs);
+  }
+  // bandOrder 1 swaps the last two SURVIVING bands, moving whole room groups
+  // front-to-rear (service band ahead of the social band). Applied after the
+  // merge so the swap acts on bands that still exist. The road-side entry
+  // band is only ever moved when just two bands remain, which is the point:
+  // it is what makes this choice a visibly different plan.
+  if (choice.bandOrder === 1 && bandGroups.length >= 2) {
+    const n = bandGroups.length;
+    bandGroups = [...bandGroups.slice(0, n - 2), bandGroups[n - 1], bandGroups[n - 2]];
   }
   const bandTotals = bandGroups.map((g) => g.reqs.reduce((s, r) => s + bandSize(r), 0));
   const bandGrand = bandTotals.reduce((a, b) => a + b, 0) || 1;
@@ -1007,6 +1081,16 @@ function applyPlanFloors(byFloor: RoomRequirement[][], plan: AIPlan, floors: num
   for (let f = 0; f < floors; f++) byFloor[f] = buckets[f];
 }
 
+/** Smallest rect containing every room (the built slab), or null if empty. */
+export function boundingRect(rooms: RoomRect[]): Rect | null {
+  if (rooms.length === 0) return null;
+  const x = Math.min(...rooms.map((r) => r.x));
+  const y = Math.min(...rooms.map((r) => r.y));
+  const w = Math.max(...rooms.map((r) => r.x + r.width)) - x;
+  const h = Math.max(...rooms.map((r) => r.y + r.length)) - y;
+  return { x, y, w, h };
+}
+
 /** Reflect rooms across the axis parallel to the road (in place). */
 function mirrorFloor(rooms: RoomRect[], plot: PlotConfig): void {
   const flipX = plot.roadSide === 'north' || plot.roadSide === 'south';
@@ -1031,9 +1115,11 @@ function buildLayout(config: ProjectConfig, choice: LayoutChoice, aiPlan?: AIPla
   const normalized = normalizeRequirements(config.rooms, config.preferences);
   const byFloor = distributeRoomsByFloor(normalized.reqs, config.floors, config.floorAssignment);
   if (aiPlan) applyPlanFloors(byFloor, aiPlan, config.floors);
+  let slabBelow: Rect | undefined;
   for (let f = 0; f < config.floors; f++) {
-    const floorRooms = generateFloorLayout(config, choice, f, byFloor[f] || [], aiPlan);
+    const floorRooms = generateFloorLayout(config, choice, f, byFloor[f] || [], aiPlan, slabBelow);
     rooms.push(...floorRooms);
+    slabBelow = boundingRect(floorRooms) ?? slabBelow;
   }
   // Enforce a private en-suite for the master + a real front entrance before
   // furniture, so swings and fixtures plan around the final doors.

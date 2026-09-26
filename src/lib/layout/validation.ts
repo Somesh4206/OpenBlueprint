@@ -6,7 +6,7 @@ import {
   ValidationResult,
 } from '../types';
 import { CAPPED_TYPES, ROOM_CATALOG } from '../room-catalog';
-import { Rect, rectsOverlap, rectWithin, buildableArea, floorFootprint } from './engine';
+import { Rect, rectsOverlap, rectWithin, buildableArea, boundingRect } from './engine';
 import { doorSwingRects, opensIntoProhibited } from './doors';
 import type { RoomRect } from '../types';
 
@@ -230,25 +230,19 @@ export function validateLayout(layout: LayoutData, config: ProjectConfig): Valid
         });
       }
     }
-    // Area conservation against the tiled footprint for this floor (upper
-    // floors sit on the ground house band when ground parking is carved).
-    const hasGroundParking = layout.rooms.some((r) => r.type === 'parking' && r.floor === 0);
-    const b = floorFootprint(layout.plot, floor, hasGroundParking);
+    // Area conservation: the rooms must tile the slab they sit on with no gap.
+    // The slab itself is sized to the floor's rooms (see builtRect), so
+    // comparing against the whole buildable envelope would flag every
+    // deliberately-smaller upper floor as an error.
+    const b = boundingRect(rooms) ?? { x: 0, y: 0, w: 0, h: 0 };
     const footprint = b.w * b.h;
     const sum = rooms.reduce((s, r) => s + r.width * r.length, 0);
     const mismatch = footprint > 0 ? Math.abs(sum - footprint) / footprint : 0;
+    const gapMsg = `Floor ${floor + 1} rooms cover ${Math.round(sum)} sq.ft of their ${Math.round(footprint)} sq.ft floor slab, so there is a gap between rooms.`;
     if (mismatch > 0.05) {
-      errors.push({
-        code: 'AREA_MISMATCH',
-        message: `Floor ${floor + 1} rooms cover ${Math.round(sum)} sq.ft of a ${Math.round(footprint)} sq.ft buildable footprint.`,
-        severity: 'error',
-      });
+      errors.push({ code: 'AREA_MISMATCH', message: gapMsg, severity: 'error' });
     } else if (mismatch > 0.02) {
-      warnings.push({
-        code: 'AREA_MISMATCH',
-        message: `Floor ${floor + 1} rooms cover ${Math.round(sum)} sq.ft of a ${Math.round(footprint)} sq.ft buildable footprint.`,
-        severity: 'warning',
-      });
+      warnings.push({ code: 'AREA_MISMATCH', message: gapMsg, severity: 'warning' });
     }
   }
 

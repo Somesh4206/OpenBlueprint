@@ -253,6 +253,21 @@ function minArea(r: RoomRequirement): number {
 }
 
 /**
+ * Narrowest a room may ever be, in EITHER orientation. A rect can only hold
+ * this room if its short side is at least this, so it is the hard floor for
+ * every BSP split. Without it, area-only splitting produces a 4.5ft kitchen.
+ */
+function minDim(r: RoomRequirement): number {
+  const cat = ROOM_CATALOG[r.type];
+  return Math.min(r.minWidth || cat.minWidth, r.minLength || cat.minLength);
+}
+
+/** Narrowest side that can hold every room in `side` (they tile along it). */
+function needNarrow(side: RoomRequirement[]): number {
+  return side.reduce((m, r) => Math.max(m, minDim(r)), 0);
+}
+
+/**
  * Area-proportioned BSP that fills `rect` with ZERO void and respects
  * minimum sizes: when the room list doesn't fit at preferred sizes, every
  * target shrinks toward its minimum (never below) instead of crushing a
@@ -278,43 +293,39 @@ export function packRect(rect: Rect, rooms: RoomRequirement[]): Placed[] {
   const rectArea = Math.max(1, rect.w * rect.h);
   const prefs = sorted.map(prefArea);
   const mins = sorted.map(minArea);
-  const totalPref = prefs.reduce((a, b) => a + b, 0);
   const totalMin = mins.reduce((a, b) => a + b, 0);
-  const scale = totalPref > 0 ? Math.min(1, rectArea / totalPref) : 1;
-  const targets = sorted.map((_, i) => Math.max(mins[i], prefs[i] * scale));
-  // Absorber: leftover space concentrates in social rooms (living first),
-  // NEVER in kitchen/bath/store. Without this, a lone dining room balloons
-  // to parking size and kitchens outgrow living rooms.
-  const ABSORB_ORDER = [
-    'living', 'dining', 'foyer', 'balcony', 'bedroom', 'office', 'pooja',
-    'store', 'utility', 'kitchen', 'bathroom', 'parking', 'staircase',
-  ];
-  let absorber = -1;
-  let absorberRank = Infinity;
-  sorted.forEach((r, i) => {
-    const rank = ABSORB_ORDER.indexOf(r.type);
-    if (rank >= 0 && rank < absorberRank) {
-      absorberRank = rank;
-      absorber = i;
+  const isFlex = sorted.map((r) => ROOM_CATALOG[r.type].sizing === 'flex');
+  // Fixed rooms (bath, store, pooja, utility, parking, staircase, foyer) take
+  // their standard size, never more than their cap. Flex rooms (living,
+  // bedroom, dining, kitchen) then share whatever the rect has left, in
+  // proportion to their preferred areas, so the rect fills EXACTLY with no
+  // gap and the leftover never inflates a bathroom or a stair lobby.
+  const targets = sorted.map((_, i) =>
+    isFlex[i]
+      ? mins[i]
+      : Math.max(mins[i], Math.min(prefs[i], ROOM_CATALOG[sorted[i].type].maxArea)),
+  );
+  const fixedTotal = targets.reduce((s, t, i) => (isFlex[i] ? s : s + t), 0);
+  const flexPref = prefs.reduce((s, p, i) => (isFlex[i] ? s + p : s), 0);
+  const flexRoom = rectArea - fixedTotal;
+  if (flexPref > 0 && flexRoom > 0) {
+    // Flex rooms may pass their catalog cap here: the validator reports that
+    // as a warning, and a gap-free floor matters more than a soft cap.
+    for (let i = 0; i < sorted.length; i++) {
+      if (isFlex[i]) targets[i] = Math.max(mins[i], (flexRoom * prefs[i]) / flexPref);
     }
-  });
-  if (absorber >= 0 && sorted.length > 1) {
-    const othersCapped = targets.reduce(
-      (s, t, i) => (i === absorber ? s : s + Math.min(t, prefs[i] * 1.5)),
-      0,
-    );
-    const absorberMax = ROOM_CATALOG[sorted[absorber].type].maxArea;
-    const inflated = Math.min(
-      absorberMax, // leftover never stretches a room past its cap
-      Math.max(targets[absorber], rectArea - othersCapped),
-    );
-    if (inflated > targets[absorber]) targets[absorber] = inflated;
+  } else if (flexPref === 0 && fixedTotal > 0) {
+    // All-fixed rect (two baths and a store): scale together to fill it
+    // rather than leaving a void.
+    const scale = rectArea / fixedTotal;
+    for (let i = 0; i < sorted.length; i++) targets[i] = Math.max(mins[i], targets[i] * scale);
   }
-  // Absolute caps (AI Context §6): no pack target may exceed its catalog
-  // maximum. Leftover area belongs to circulation/balcony/open-to-sky.
-  for (let i = 0; i < sorted.length; i++) {
-    const cap = ROOM_CATALOG[sorted[i].type].maxArea;
-    if (targets[i] > cap) targets[i] = cap;
+  // Over-subscribed rect: every target shrinks toward its minimum together
+  // (never below), so the squeeze is shared instead of falling on one room.
+  const sumTargets = targets.reduce((a, b) => a + b, 0);
+  if (sumTargets > rectArea && sumTargets > totalMin) {
+    const t = Math.max(0, (rectArea - totalMin) / (sumTargets - totalMin));
+    for (let i = 0; i < sorted.length; i++) targets[i] = mins[i] + (targets[i] - mins[i]) * t;
   }
   const totalTarget = targets.reduce((a, b) => a + b, 0);
 
@@ -336,22 +347,31 @@ export function packRect(rect: Rect, rooms: RoomRequirement[]): Placed[] {
   // uncapped rooms never fail). Multiroom sides keep the thin-strip
   // heuristic, applied only when they hold capped rooms.
   const sideCost = (w: number, h: number, side: RoomRequirement[]): number => {
+    const thin = Math.min(w, h);
+    // A child narrower than its narrowest room cannot hold it at all: a 4.5ft
+    // kitchen or an 8ft parking bay is unusable no matter how its area reads.
+    // Weighted above every other term so the search avoids it outright.
+    const need = needNarrow(side);
+    let cost = thin < need - 0.05 ? 25 + (need - thin) * 5 : 0;
     if (side.length === 1) {
       const cat = ROOM_CATALOG[side[0].type];
-      if (!CAPPED_TYPES.has(side[0].type)) return 0;
       const area = Math.max(0.5, w) * Math.max(0.5, h);
-      let cost = 0;
-      if (area > cat.maxArea + 0.5) cost += 10 + (area - cat.maxArea) / 10;
+      // Every FIXED room is charged for passing its cap, whether or not it is
+      // in CAPPED_TYPES (which covers only bedroom/bathroom/kitchen/living).
+      // A foyer is fixed at 72 sq.ft but absent from that set, so without
+      // this an "Upper Lobby" alone in a child rect quietly took 209 sq.ft.
+      // Flex rooms are exempt: absorbing the leftover is their job.
+      if (cat.sizing === 'fixed' && area > cat.maxArea + 0.5) cost += 10 + (area - cat.maxArea) / 10;
+      if (!CAPPED_TYPES.has(side[0].type)) return cost;
       const aspect = Math.max(w, h) / Math.max(0.5, Math.min(w, h));
       if (aspect > cat.maxAspect + 0.05) cost += 10 + (aspect - cat.maxAspect) * 5;
       return cost;
     }
-    if (!side.some((r) => CAPPED_TYPES.has(r.type))) return 0;
-    const thin = Math.min(w, h);
+    if (!side.some((r) => CAPPED_TYPES.has(r.type))) return cost;
     // Thin strips doom their rooms: 24x1-style slivers come from here.
-    if (thin < MIN_SIDE) return 10 + (MIN_SIDE - thin);
-    if (thin < MIN_BAND_DEPTH) return 1 + (MIN_BAND_DEPTH - thin) / MIN_BAND_DEPTH;
-    return 0;
+    if (thin < MIN_SIDE) return cost + 10 + (MIN_SIDE - thin);
+    if (thin < MIN_BAND_DEPTH) return cost + 1 + (MIN_BAND_DEPTH - thin) / MIN_BAND_DEPTH;
+    return cost;
   };
   let splitIdx = 1;
   let splitVertical = rect.w >= rect.h;
@@ -362,10 +382,13 @@ export function packRect(rect: Rect, rooms: RoomRequirement[]): Placed[] {
     const balance = totalTarget > 0 ? Math.abs(acc / totalTarget - 0.5) : 0.5;
     for (const vertical of [true, false]) {
       const span = vertical ? rect.w : rect.h;
-      // Both children keep at least MIN_SIDE (legacy single-side clamp);
-      // degenerate spans still tile so tiny rooms never error here.
+      // Both children keep at least MIN_SIDE, and — when the span allows it —
+      // enough width for the narrowest room each one holds.
       let d = span * (totalTarget > 0 ? acc / totalTarget : 0.5);
       d = Math.max(MIN_SIDE, Math.min(span - MIN_SIDE, d));
+      const lo = needNarrow(sorted.slice(0, i));
+      const hi = span - needNarrow(sorted.slice(i));
+      if (lo <= hi) d = Math.min(Math.max(d, lo), hi);
       d = Math.round(d * 2) / 2;
       const c1 = vertical ? { w: d, h: rect.h } : { w: rect.w, h: d };
       const c2 = vertical ? { w: span - d, h: rect.h } : { w: rect.w, h: span - d };
@@ -400,17 +423,23 @@ export function packRect(rect: Rect, rooms: RoomRequirement[]): Placed[] {
   ratio = Math.min(Math.max(ratio, Math.min(minRatio, 0.85)), Math.max(maxRatio, 0.15));
   ratio = Math.min(0.85, Math.max(0.15, ratio));
 
+  // Same minimum-dimension clamp as the candidate scan, so the split that
+  // actually gets cut is the one that was scored.
+  const needLeft = needNarrow(leftRooms);
+  const needRight = needNarrow(rightRooms);
+  const clampSplit = (span: number, raw: number): number => {
+    let d = Math.max(MIN_SIDE, Math.min(span - MIN_SIDE, raw));
+    const hi = span - needRight;
+    if (needLeft <= hi) d = Math.min(Math.max(d, needLeft), hi);
+    return Math.round(d * 2) / 2;
+  };
   let leftRect: Rect, rightRect: Rect;
   if (splitVertical) {
-    let sw = rect.w * ratio;
-    sw = Math.max(MIN_SIDE, Math.min(rect.w - MIN_SIDE, sw));
-    sw = Math.round(sw * 2) / 2;
+    const sw = clampSplit(rect.w, rect.w * ratio);
     leftRect = { x: rect.x, y: rect.y, w: sw, h: rect.h };
     rightRect = { x: rect.x + sw, y: rect.y, w: rect.w - sw, h: rect.h };
   } else {
-    let sh = rect.h * ratio;
-    sh = Math.max(MIN_SIDE, Math.min(rect.h - MIN_SIDE, sh));
-    sh = Math.round(sh * 2) / 2;
+    const sh = clampSplit(rect.h, rect.h * ratio);
     leftRect = { x: rect.x, y: rect.y, w: rect.w, h: sh };
     rightRect = { x: rect.x, y: rect.y + sh, w: rect.w, h: rect.h - sh };
   }
