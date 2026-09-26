@@ -473,15 +473,28 @@ function bspPackZone(rect: Rect, rooms: RoomRequirement[]): Placed[] {
 // Post-placement adjustment: try to swap rooms to satisfy desired adjacencies.
 // Only swaps rooms WITHIN THE SAME ZONE to preserve zone clustering.
 export function countCapViolations(rs: { type: RoomRect['type']; width: number; length: number }[]): number {
-  // Cap violations a swap would create (capped types only). A swap that
-  // manufactures a sliver to gain an adjacency point is never worth it.
+  // Defects a swap would create. Used as a guard by both optimizeAdjacencies
+  // and repairGeometry, so anything it cannot see, those are free to inflict.
   let n = 0;
   for (const r of rs) {
-    if (!CAPPED_TYPES.has(r.type)) continue;
     const cat = ROOM_CATALOG[r.type];
-    if (r.width * r.length > cat.maxArea + 0.5) n++;
-    const aspect = Math.max(r.width, r.length) / Math.max(0.5, Math.min(r.width, r.length));
-    if (aspect > cat.maxAspect + 0.05) n++;
+    if (!cat) continue;
+    const short = Math.min(r.width, r.length);
+    const long = Math.max(r.width, r.length);
+    const area = r.width * r.length;
+    const capped = CAPPED_TYPES.has(r.type);
+    // Unusable slot, counted for EVERY type: a room narrower than its own
+    // catalog minimum in either orientation cannot be built. Without this a
+    // bedroom (minWidth 9) landed in a 5ft slot and scored as an improvement,
+    // because losing an area violation outweighed gaining nothing countable.
+    if (short < Math.min(cat.minWidth, cat.minLength) - 0.5) n++;
+    if (long < Math.max(cat.minWidth, cat.minLength) - 0.5) n++;
+    // Area cap applies to capped types AND to every fixed room: foyer is
+    // fixed at 72 sq.ft but absent from CAPPED_TYPES, so an "Upper Lobby"
+    // swallowing 200 sq.ft used to cost nothing here.
+    if ((capped || cat.sizing === 'fixed') && area > cat.maxArea + 0.5) n++;
+    // Aspect stays a capped-type concern (circulation may be long and thin).
+    if (capped && long / Math.max(0.5, short) > cat.maxAspect + 0.05) n++;
   }
   return n;
 }
