@@ -200,7 +200,6 @@ export function placeZoneRooms(
   cluster: ZoneCluster,
   floor: number,
   plot: PlotConfig,
-  strategy: LayoutStrategy,
   anchorRank?: (r: RoomRequirement) => number,
 ): RoomRect[] {
   const rooms = cluster.rooms;

@@ -1,6 +1,6 @@
 import {
+  LayoutChoice,
   LayoutData,
-  LayoutStrategy,
   PlotConfig,
   ProjectConfig,
   RoomRect,
@@ -53,7 +53,7 @@ function repairGeometry(
   // can never regress — only the score decides.
   const diagScore = (rs: RoomRect[]) => {
     const v = validateLayout(
-      { plot: config.plot, floors: config.floors, rooms: [...others, ...rs], furniture: [], strategy: 'space-optimized' },
+      { plot: config.plot, floors: config.floors, rooms: [...others, ...rs], furniture: [] },
       config,
     );
     let balloon = 0;
@@ -247,11 +247,29 @@ import type { AIPlan, RoomPlacement } from '../ai/blueprint-planner';
 
 export { scoreLayout, validateLayout };
 
-// local id generator
+// local id generator. During generation the seed is pinned so the same
+// config + choice always yields byte-identical ids (determinism).
 let _idCounter = 0;
+let _idSeed: string | null = null;
 export function genId(prefix = 'r'): string {
   _idCounter += 1;
-  return `${prefix}${Date.now().toString(36)}${_idCounter}`;
+  return `${prefix}${_idSeed ?? Date.now().toString(36)}${_idCounter}`;
+}
+/** Pin the id seed for one deterministic generation pass. */
+export function beginSeededIds(seed: string): void {
+  _idSeed = seed;
+  _idCounter = 0;
+}
+export function endSeededIds(): void {
+  _idSeed = null;
+}
+export function hashSeed(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
 }
 
 // ---- Geometry helpers ----
@@ -378,59 +396,24 @@ export function floorFootprint(plot: PlotConfig, floor: number, hasGroundParking
   return b;
 }
 
-// ---- Strategy bias: keeps the 5 design variants distinct ----
-// Each strategy nudges within-zone ordering so variants genuinely differ
-// while all still obey zone clustering + AI anchors + hard rules.
-function strategyBias(r: RoomRequirement, strategy: LayoutStrategy): number {
-  const cat = ROOM_CATALOG[r.type];
-  const area = (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
-  switch (strategy) {
-    case 'space-optimized':
-      return -area / 1000; // big rooms first → tighter pack
-    case 'ventilation-optimized': {
-      const light: Record<string, number> = {
-        balcony: 0, living: 1, bedroom: 2, kitchen: 3, dining: 3,
-        pooja: 4, office: 4, foyer: 5, bathroom: 6, store: 7, utility: 7,
-      };
-      return (light[r.type] ?? 5) - area / 10000;
-    }
-    case 'modern-open': {
-      const open: Record<string, number> = {
-        foyer: 0, living: 1, dining: 2, kitchen: 3, balcony: 4,
-      };
-      return (open[r.type] ?? 5) - area / 10000;
-    }
-    case 'privacy-optimized': {
-      const priv: Record<string, number> = {
-        foyer: 0, living: 1, dining: 2, kitchen: 3, balcony: 3,
-        office: 4, pooja: 4, store: 5, utility: 5, bathroom: 6, bedroom: 7,
-      };
-      return (priv[r.type] ?? 5) - area / 10000;
-    }
-    case 'vastu-optimized': {
-      // SW (master bedroom) → SE (kitchen) → NE (pooja, living) → NW (bathroom, utility)
-      const vastuOrder: Record<string, number> = {
-        bedroom: 0, staircase: 1, kitchen: 2, pooja: 3, living: 4,
-        foyer: 5, dining: 6, parking: 7, bathroom: 8, utility: 9,
-        store: 10, office: 11, balcony: 12,
-      };
-      return vastuOrder[r.type] ?? 99;
-    }
-  }
+// ---- Layout choices: knobs the engine turns into real geometry ----
+export const DEFAULT_CHOICE: LayoutChoice = {
+  mirror: false,
+  stairSlot: 'left',
+  kitchenCorner: 'rear-left',
+  bandOrder: 0,
+};
+
+/** Within-band ordering nudge from the choice. 0 keeps catalog area order. */
+function choiceBias(r: RoomRequirement, choice: LayoutChoice): number {
+  if (r.type === 'kitchen') return choice.kitchenCorner === 'rear-left' ? -1 : 1;
+  return 0;
 }
 
-/** Composite within-zone rank: AI anchor dominates, strategy breaks ties. */
-export function orderRank(r: RoomRequirement, strategy: LayoutStrategy, anchor: number): number {
-  return anchor * 1000 + strategyBias(r, strategy);
+/** Composite within-band rank: AI anchor dominates, the choice breaks ties. */
+export function orderRank(r: RoomRequirement, choice: LayoutChoice, anchor: number): number {
+  return anchor * 1000 + choiceBias(r, choice);
 }
-
-const STRATEGIES: { strategy: LayoutStrategy; name: string; tagline: string }[] = [
-  { strategy: 'space-optimized', name: 'Design A', tagline: 'Space Optimized' },
-  { strategy: 'ventilation-optimized', name: 'Design B', tagline: 'Ventilation Optimized' },
-  { strategy: 'modern-open', name: 'Design C', tagline: 'Modern Open Layout' },
-  { strategy: 'privacy-optimized', name: 'Design D', tagline: 'Privacy Optimized' },
-  { strategy: 'vastu-optimized', name: 'Design E', tagline: 'Vastu Compliant' },
-];
 
 function ensureStaircase(reqs: RoomRequirement[], floors: number): RoomRequirement[] {
   // Staircase is now FURNITURE, not a room. Don't add it as a room requirement.
@@ -566,7 +549,7 @@ function anchorRankOf(p?: RoomPlacement): number {
 
 export function generateFloorLayout(
   config: ProjectConfig,
-  strategy: LayoutStrategy,
+  choice: LayoutChoice,
   floor: number,
   floorReqs: RoomRequirement[] = expandRequirements(config.rooms),
   aiPlan?: AIPlan,
@@ -586,7 +569,7 @@ export function generateFloorLayout(
 
   const floorPlan = aiPlan?.floors.find((f) => f.floor === floor);
   const byName = new Map((floorPlan?.placements || []).map((p) => [p.name, p]));
-  const rankOf = (r: RoomRequirement) => orderRank(r, strategy, anchorRankOf(byName.get(r.name)));
+  const rankOf = (r: RoomRequirement) => orderRank(r, choice, anchorRankOf(byName.get(r.name)));
 
   // Step 1: Carve the parking corner at the road side (ground floor only).
   // A parking bay is L-shaped leftovers' enemy: the corner bay PLUS the
@@ -708,6 +691,13 @@ export function generateFloorLayout(
     return (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
   };
   let bandGroups = assignBands(houseReqs, floor);
+  // bandOrder 1 swaps the last two bands, moving whole room groups
+  // front-to-rear (dining ahead of the kitchen instead of behind it, service
+  // behind the private band). The entry band always stays at the road.
+  if (choice.bandOrder === 1 && bandGroups.length >= 2) {
+    const n = bandGroups.length;
+    bandGroups = [...bandGroups.slice(0, n - 2), bandGroups[n - 1], bandGroups[n - 2]];
+  }
   // Ribbon guard: a band strip must be deep enough for its members' aspect
   // needs (capped room types: sqrt of clamped target area over max aspect),
   // and never under MIN_BAND_DEPTH. Too-thin bands merge into a neighbor
@@ -787,11 +777,12 @@ export function generateFloorLayout(
     stripRects.push(rect);
     walkEnd += fromHigh ? -depth : depth;
   });
-  const remnant = houseRect.h - stripRects.reduce((s, r) => s + r.h, 0);
-  const gardenViable = houseRect.w >= 6 && remnant >= 6 && houseRect.w * remnant >= 48;
-  if (!gardenViable && stripRects.length > 0) {
-    // Absorb the remnant into the last strip (today's behaviour): extend it
-    // from its packed edge out to the far edge, keeping its placed edge.
+  // The last strip always absorbs the remainder, so strips tile houseRect
+  // exactly. No remnant is ever turned into a room the user did not ask for
+  // (the old code manufactured a "Garden"/"Terrace" balcony here).
+  if (stripRects.length > 0) {
+    // Extend the last strip from its packed edge out to the far edge,
+    // keeping its placed edge.
     const last = stripRects[stripRects.length - 1];
     if (fromHigh) {
       last.h = last.y + last.h - farEdge;
@@ -802,34 +793,19 @@ export function generateFloorLayout(
   }
   bandGroups.forEach((g, i) => {
     const rect = stripRects[i];
-    const bandRooms = optimizeAdjacencies(placeZoneRooms({ zone: 'public', rooms: g.reqs, rect }, floor, config.plot, strategy, rankOf));
+    const bandRooms = optimizeAdjacencies(placeZoneRooms({ zone: 'public', rooms: g.reqs, rect }, floor, config.plot, rankOf));
     for (const r of bandRooms) packGroup.set(r.id, `band-${g.band}`);
     placed.push(...bandRooms);
     cursor += fromHigh ? -rect.h : rect.h;
   });
-  if (gardenViable) {
-    // NOTE: walkEnd (post-walk cursor), NOT cursor: the placement loop below
-    // has not run yet, so cursor still holds the walk start. Using cursor
-    // here sizes the garden to the full house and overlaps every strip.
-    const gh = round(Math.abs(walkEnd - farEdge));
-    const garden: RoomRect = {
-      id: genId(),
-      type: 'balcony',
-      name: floor === 0 ? 'Garden' : 'Terrace',
-      x: round(houseRect.x),
-      y: round(fromHigh ? farEdge : walkEnd),
-      width: round(houseRect.w),
-      length: gh,
-      floor,
-      doors: [],
-      windows: [],
-    };
-    packGroup.set(garden.id, 'band-garden');
-    placed.push(garden);
-  }
 
   // Step 3: (per-group adjacency optimization already applied above)
   out.push(...placed);
+  // Mirror knob: reflect this floor across the axis PARALLEL to the road, so
+  // the road side is preserved while the plan genuinely flips (parking left
+  // vs right). Applied before the door solver, so openings are solved on the
+  // final geometry.
+  if (choice.mirror) mirrorFloor(out.filter((r) => r.floor === floor), config.plot);
   if (process.env.LAYOUT_DEBUG === '1') {
     for (const r of out.filter((x) => x.floor === floor)) console.error(`[layout-debug] packed f${floor} ${r.type}:${r.name} ${r.width}x${r.length} @(${r.x},${r.y})`);
   }
@@ -1031,13 +1007,32 @@ function applyPlanFloors(byFloor: RoomRequirement[][], plan: AIPlan, floors: num
   for (let f = 0; f < floors; f++) byFloor[f] = buckets[f];
 }
 
-export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy, aiPlan?: AIPlan): LayoutData {
+/** Reflect rooms across the axis parallel to the road (in place). */
+function mirrorFloor(rooms: RoomRect[], plot: PlotConfig): void {
+  const flipX = plot.roadSide === 'north' || plot.roadSide === 'south';
+  for (const r of rooms) {
+    if (flipX) r.x = round(plot.width - r.x - r.width);
+    else r.y = round(plot.length - r.y - r.length);
+  }
+}
+
+export function generateLayout(config: ProjectConfig, choice: LayoutChoice, aiPlan?: AIPlan): LayoutData {
+  // Deterministic ids: same config + choice => same ids on every run.
+  beginSeededIds(hashSeed(JSON.stringify({ config, choice })));
+  try {
+    return buildLayout(config, choice, aiPlan);
+  } finally {
+    endSeededIds();
+  }
+}
+
+function buildLayout(config: ProjectConfig, choice: LayoutChoice, aiPlan?: AIPlan): LayoutData {
   const rooms: RoomRect[] = [];
   const normalized = normalizeRequirements(config.rooms, config.preferences);
   const byFloor = distributeRoomsByFloor(normalized.reqs, config.floors, config.floorAssignment);
   if (aiPlan) applyPlanFloors(byFloor, aiPlan, config.floors);
   for (let f = 0; f < config.floors; f++) {
-    const floorRooms = generateFloorLayout(config, strategy, f, byFloor[f] || [], aiPlan);
+    const floorRooms = generateFloorLayout(config, choice, f, byFloor[f] || [], aiPlan);
     rooms.push(...floorRooms);
   }
   // Enforce a private en-suite for the master + a real front entrance before
@@ -1070,7 +1065,8 @@ export function generateLayout(config: ProjectConfig, strategy: LayoutStrategy, 
     floors: config.floors,
     rooms,
     furniture,
-    strategy,
+    choice,
+    choiceLabel: choiceLabel(choice),
     reasoning: aiPlan?.reasoning,
     assumptions: [],
   };
@@ -1679,7 +1675,7 @@ function ensureMasterEnSuite(rooms: RoomRect[]): void {
 
 function toScored(
   config: ProjectConfig,
-  s: { strategy: LayoutStrategy; name: string; tagline: string },
+  s: { choice: LayoutChoice; name: string; tagline: string },
   layout: LayoutData,
   extra?: { reasoning?: string; assumptions?: string[]; aiPlanned?: boolean },
 ): ScoredLayout {
@@ -1688,7 +1684,7 @@ function toScored(
   return {
     id: genId('d'),
     name: s.name,
-    strategy: s.strategy,
+    choice: s.choice,
     tagline: s.tagline,
     layout,
     score,
@@ -1700,25 +1696,47 @@ function toScored(
   };
 }
 
+/** Human-readable label for a choice, e.g. "Stair left · kitchen rear-right". */
+export function choiceLabel(c: LayoutChoice): string {
+  const parts = [`Stair ${c.stairSlot}`, `kitchen ${c.kitchenCorner.replace('rear-', 'rear ')}`];
+  if (c.bandOrder === 1) parts.push('service forward');
+  if (c.mirror) parts.push('mirrored');
+  return parts.join(' · ');
+}
+
+// Provisional variant set until Task 7's searchDesigns lands.
+const PROVISIONAL_CHOICES: LayoutChoice[] = [
+  DEFAULT_CHOICE,
+  { ...DEFAULT_CHOICE, mirror: true },
+  { ...DEFAULT_CHOICE, kitchenCorner: 'rear-right' },
+  { ...DEFAULT_CHOICE, bandOrder: 1 },
+  { ...DEFAULT_CHOICE, stairSlot: 'right' },
+];
+
+const designName = (i) => `Design ${String.fromCharCode(65 + i)}`;
+
 /** Deterministic offline fallback (no AI). Used by tests + client fallback. */
 export function generateDesignOptions(config: ProjectConfig): ScoredLayout[] {
-  return STRATEGIES.map((s) => {
-    const layout = generateLayout(config, s.strategy);
-    return toScored(config, s, layout, { assumptions: layout.assumptions, aiPlanned: false });
+  return PROVISIONAL_CHOICES.map((c, i) => {
+    const layout = generateLayout(config, c);
+    return toScored(config, { choice: c, name: designName(i), tagline: choiceLabel(c) }, layout, {
+      assumptions: layout.assumptions,
+      aiPlanned: false,
+    });
   });
 }
 
 /**
- * AI-first variants: one shared AI plan (the brain) realized with 5
- * strategy emphases (the ruler). Every design carries the AI reasoning.
+ * AI-first variants: one shared AI plan (the brain) realized with several
+ * layout choices (the ruler). Every design carries the AI reasoning.
  */
 export function generateAIDesignOptions(
   config: ProjectConfig,
   aiPlan: AIPlan,
 ): { designs: ScoredLayout[]; reasoning: string; assumptions: string[] } {
-  const designs = STRATEGIES.map((s) => {
-    const layout = generateLayout(config, s.strategy, aiPlan);
-    return toScored(config, s, layout, {
+  const designs = PROVISIONAL_CHOICES.map((c, i) => {
+    const layout = generateLayout(config, c, aiPlan);
+    return toScored(config, { choice: c, name: designName(i), tagline: choiceLabel(c) }, layout, {
       reasoning: aiPlan.reasoning,
       assumptions: [...aiPlan.assumptions, ...(layout.assumptions || [])],
       aiPlanned: true,

@@ -2,22 +2,23 @@ import {
   AiAction,
   DesignInsight,
   LayoutData,
-  LayoutStrategy,
+  LayoutChoice,
   ProjectConfig,
   RoomRect,
   RoomType,
 } from '../types';
 import { ROOM_CATALOG } from '../room-catalog';
-import { genId, generateLayout } from '../layout/engine';
+import { DEFAULT_CHOICE, genId, generateLayout } from '../layout/engine';
 
-const STRATEGY_MAP: Record<string, LayoutStrategy> = {
-  open: 'modern-open',
-  modern: 'modern-open',
-  privacy: 'privacy-optimized',
-  ventilat: 'ventilation-optimized',
-  compact: 'space-optimized',
-  space: 'space-optimized',
-  vastu: 'vastu-optimized',
+// "rearrange" hints map to a layout choice (the old strategy labels are gone).
+const CHOICE_MAP: Record<string, LayoutChoice> = {
+  open: { ...DEFAULT_CHOICE, bandOrder: 1 },
+  modern: { ...DEFAULT_CHOICE, bandOrder: 1 },
+  privacy: { ...DEFAULT_CHOICE, stairSlot: 'center' },
+  ventilat: { ...DEFAULT_CHOICE, mirror: true },
+  compact: DEFAULT_CHOICE,
+  space: DEFAULT_CHOICE,
+  vastu: { ...DEFAULT_CHOICE, kitchenCorner: 'rear-right' },
 };
 
 export function applyActions(
@@ -86,9 +87,8 @@ export function applyActions(
       }
       case 'rearrange': {
         const hint = (a.targetLocation || '').toLowerCase();
-        const strat = Object.keys(STRATEGY_MAP).find((k) => hint.includes(k));
-        const strategy = strat ? STRATEGY_MAP[strat] : 'space-optimized';
-        return generateLayout(config, strategy);
+        const strat = Object.keys(CHOICE_MAP).find((k) => hint.includes(k));
+        return generateLayout(config, strat ? CHOICE_MAP[strat] : DEFAULT_CHOICE);
       }
       case 'note':
       default:
@@ -251,8 +251,8 @@ function mkRoom(type: RoomType, name: string, x: number, y: number, w: number, l
   };
 }
 
-export function regenerateStrategy(config: ProjectConfig, strategy: LayoutStrategy): LayoutData {
-  return generateLayout(config, strategy);
+export function regenerateStrategy(config: ProjectConfig, choice: LayoutChoice = DEFAULT_CHOICE): LayoutData {
+  return generateLayout(config, choice);
 }
 
 export function generateInsights(layout: LayoutData, config: ProjectConfig): DesignInsight[] {
