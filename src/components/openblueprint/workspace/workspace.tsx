@@ -75,7 +75,7 @@ import { BlueprintCanvas } from './blueprint-canvas';
 import { AiAssistant } from './ai-assistant';
 import { ToolPanel } from './tool-panel';
 import { ValidationPanel } from './panels';
-import { computeBuiltUpArea, estimateCost, formatINR } from '@/lib/cost/estimator';
+import { computeBuiltUpArea, computeBuiltUpAreaByFloor, computeFAR, estimateCost, formatINR } from '@/lib/cost/estimator';
 import { validateLayout } from '@/lib/layout/engine';
 import { generateInsights } from '@/lib/ai/apply-actions';
 import { genId } from '@/lib/layout/engine';
@@ -134,7 +134,8 @@ export function Workspace({ config, design, projectId }: Props) {
   const [showLabels3d, setShowLabels3d] = useState(true);
   const [cameraView, setCameraView] = useState<'orbit' | 'top' | 'front' | 'isometric'>('isometric');
   const [zoom, setZoom] = useState(1);
-  const [projectName, setProjectName] = useState('My 30×40 Home');
+  const [projectName, setProjectName] = useState('My Blueprint');
+  const displayName = projectName.trim() ? projectName : 'My Blueprint';
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
   const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' } | null>(null);
@@ -176,6 +177,11 @@ export function Workspace({ config, design, projectId }: Props) {
   const insights: DesignInsight[] = useMemo(() => generateInsights(layout, config), [layout, config]);
   const cost: CostEstimate = useMemo(() => estimateCost(layout, finish, materials), [layout, finish, materials]);
   const builtUp = computeBuiltUpArea(layout);
+  const builtUpByFloor = useMemo(() => computeBuiltUpAreaByFloor(layout), [layout]);
+  const plotArea = layout.plot.unit === 'm'
+    ? Math.round(layout.plot.width * layout.plot.length * 10.76391)
+    : Math.round(layout.plot.width * layout.plot.length);
+  const far = useMemo(() => computeFAR(layout), [layout]);
 
   function showToast(msg: string, kind: 'ok' | 'err' = 'ok') {
     setToast({ msg, kind });
@@ -220,7 +226,7 @@ export function Workspace({ config, design, projectId }: Props) {
   // save project
   const saveProject = useCallback(async () => {
     try {
-      const body = { name: projectName, config, design: { ...design, layout }, accentColor };
+      const body = { name: displayName, config, design: { ...design, layout }, accentColor };
       if (projectId) {
         await fetch(`/api/projects/${projectId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       } else {
@@ -233,7 +239,7 @@ export function Workspace({ config, design, projectId }: Props) {
     } catch {
       showToast('Save failed', 'err');
     }
-  }, [projectName, config, design, layout, accentColor, projectId, setView]);
+  }, [displayName, config, design, layout, accentColor, projectId, setView]);
 
   const selectedRoom = layout.rooms.find((r) => r.id === selectedRoomId) || null;
 
@@ -253,7 +259,9 @@ export function Workspace({ config, design, projectId }: Props) {
           <Input
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
-            className="h-8 w-40 sm:w-56 border-transparent hover:border-border focus-visible:border-border bg-transparent font-medium"
+            placeholder="My Blueprint"
+            title={displayName}
+            className="h-8 w-48 sm:w-64 border-transparent hover:border-border focus-visible:border-border bg-transparent font-medium truncate"
           />
           <Badge variant="outline" className="hidden md:inline-flex tech-num capitalize">{config.style}</Badge>
         </div>
@@ -311,7 +319,7 @@ export function Workspace({ config, design, projectId }: Props) {
           {/* 2D / 3D switch */}
           <div className="flex items-center rounded-md border border-border p-0.5 bg-muted/40">
             <button
-              onClick={() => setView2d(true)}
+              onClick={() => { setView2d(true); setShowAllFloors(false); setSelectedRoom(null); setSelectedFurniture(null); }}
               className={cn('px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors', view2d ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground')}
             >
               <Square className="size-3.5" /> 2D
@@ -396,7 +404,7 @@ export function Workspace({ config, design, projectId }: Props) {
                   <ToggleChip active={showFurniture2d} onClick={() => setShowFurniture2d(!showFurniture2d)} icon={Sofa} label="Furniture" />
                   <Separator orientation="vertical" className="h-5" />
                   <span className="text-xs text-muted-foreground hidden sm:inline">Floor:</span>
-                  <FloorSelector floors={layout.floors} current={currentFloor} onChange={setCurrentFloor} showAll={showAllFloors} onShowAll={setShowAllFloors} />
+                  <FloorSelector floors={layout.floors} current={currentFloor} onChange={(f) => { setCurrentFloor(f); setSelectedRoom(null); setSelectedFurniture(null); }} showAll={false} onShowAll={() => {}} allowAll={false} />
                 </>
               ) : (
                 <>
@@ -404,6 +412,9 @@ export function Workspace({ config, design, projectId }: Props) {
                   {(['orbit', 'isometric', 'front', 'top'] as const).map((v) => (
                     <button key={v} onClick={() => setCameraView(v)} className={cn('text-xs px-2 py-1 rounded capitalize', cameraView === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{v}</button>
                   ))}
+                  <Separator orientation="vertical" className="h-5" />
+                  <span className="text-xs text-muted-foreground hidden sm:inline">Floor:</span>
+                  <FloorSelector floors={layout.floors} current={currentFloor} onChange={setCurrentFloor} showAll={showAllFloors} onShowAll={setShowAllFloors} allowAll />
                   <Separator orientation="vertical" className="h-5" />
                   <ToggleChip active={showWalls3d} onClick={() => setShowWalls3d(!showWalls3d)} icon={Box} label="Walls" />
                   <ToggleChip active={showFurniture3d} onClick={() => setShowFurniture3d(!showFurniture3d)} icon={Sofa} label="Furniture" />
@@ -486,7 +497,11 @@ export function Workspace({ config, design, projectId }: Props) {
                 {validation.valid ? 'Layout valid' : `${validation.errors.length} issue(s)`}
               </span>
               <Separator orientation="vertical" className="h-4" />
-              <span className="text-muted-foreground tech-num">Area: <b className="text-foreground">{builtUp.toLocaleString()} sq.ft</b></span>
+              <span className="text-muted-foreground tech-num" title={`Ground: ${(builtUpByFloor[0] || 0).toLocaleString()} sq.ft${builtUpByFloor[1] !== undefined ? ` · Upper: ${(builtUpByFloor[1] || 0).toLocaleString()} sq.ft` : ''} · Plot: ${plotArea.toLocaleString()} sq.ft · FAR: ${far}`}>
+                {builtUpByFloor.length > 1
+                  ? <>Ground: <b className="text-foreground">{(builtUpByFloor[0] || 0).toLocaleString()}</b> · Upper: <b className="text-foreground">{(builtUpByFloor[1] || 0).toLocaleString()}</b> · Total: <b className="text-foreground">{builtUp.toLocaleString()} sq.ft</b> <span className="hidden lg:inline">(Plot: {plotArea.toLocaleString()} · FAR: {far})</span></>
+                  : <>Area: <b className="text-foreground">{builtUp.toLocaleString()} sq.ft</b> <span className="hidden lg:inline">(Plot: {plotArea.toLocaleString()} · FAR: {far})</span></>}
+              </span>
               <Separator orientation="vertical" className="h-4 hidden sm:block" />
               <span className="text-muted-foreground hidden sm:inline tech-num">Rooms: <b className="text-foreground">{layout.rooms.length}</b></span>
             </div>
@@ -502,7 +517,7 @@ export function Workspace({ config, design, projectId }: Props) {
         <aside className="w-80 lg:w-96 border-l border-border bg-card flex flex-col shrink-0 overflow-hidden">
           {/* AI Assistant (always at top) */}
           {aiPanelOpen && (
-            <AiAssistant layout={layout} config={config} onApplyLayout={(l) => { setLayout(l); showToast('AI changes applied'); }} />
+            <AiAssistant layout={layout} config={config} currentFloor={currentFloor} onApplyLayout={(l) => { setLayout(l); showToast('AI changes applied'); }} />
           )}
           {/* Right tabs */}
           <div className="border-t border-border flex items-center gap-0.5 px-1 h-11 shrink-0 overflow-x-auto scroll-thin">
@@ -567,7 +582,7 @@ export function Workspace({ config, design, projectId }: Props) {
       </div>
 
       {/* Export modal */}
-      <ExportModal open={exportOpen} onOpenChange={setExportOpen} layout={layout} config={config} projectName={projectName} finish={finish} materials={materials} accentColor={accentColor} showToast={showToast} />
+      <ExportModal open={exportOpen} onOpenChange={setExportOpen} layout={layout} config={config} projectName={displayName} finish={finish} materials={materials} accentColor={accentColor} showToast={showToast} />
     </div>
   );
 }
@@ -589,7 +604,7 @@ function ToggleChip({ active, onClick, icon: Icon, label }: { active: boolean; o
   );
 }
 
-function FloorSelector({ floors, current, onChange, showAll, onShowAll }: { floors: number; current: number; onChange: (f: number) => void; showAll: boolean; onShowAll: (b: boolean) => void }) {
+function FloorSelector({ floors, current, onChange, showAll, onShowAll, allowAll = true }: { floors: number; current: number; onChange: (f: number) => void; showAll: boolean; onShowAll: (b: boolean) => void; allowAll?: boolean }) {
   const labels = ['Ground', 'First', 'Second', 'Third'];
   return (
     <div className="flex items-center gap-1">
@@ -598,9 +613,14 @@ function FloorSelector({ floors, current, onChange, showAll, onShowAll }: { floo
           {labels[i]}
         </button>
       ))}
-      <button onClick={() => onShowAll(!showAll)} className={cn('text-xs px-2 py-1 rounded flex items-center gap-1', showAll ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
-        {showAll ? <EyeOff className="size-3" /> : <Eye className="size-3" />} All
-      </button>
+      {/* "All" stacks every floor at the same coordinates — meaningful only in
+          3D (vertical stacking). In 2D it superimposes plans into one
+          unreadable collision, so it is hidden there. */}
+      {allowAll && (
+        <button onClick={() => onShowAll(!showAll)} className={cn('text-xs px-2 py-1 rounded flex items-center gap-1', showAll ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
+          {showAll ? <EyeOff className="size-3" /> : <Eye className="size-3" />} All
+        </button>
+      )}
     </div>
   );
 }
@@ -611,6 +631,9 @@ function SpaceAnalysis({ layout, config, builtUp, selectedRoom }: { layout: Layo
   const openArea = Math.max(0, plotArea - builtUp);
   const utilization = plotArea > 0 ? Math.round((builtUp / plotArea) * 100) : 0;
   const roomCount = layout.rooms.length;
+  const byFloor = computeBuiltUpAreaByFloor(layout);
+  const far = computeFAR(layout);
+  const floorLabels = ['Ground', 'First', 'Second', 'Third'];
 
   return (
     <div className="space-y-4">
@@ -618,7 +641,10 @@ function SpaceAnalysis({ layout, config, builtUp, selectedRoom }: { layout: Layo
         <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><Layers className="size-4 text-cyan" /> Space Analysis</h3>
         <div className="space-y-2">
           <StatRow label="Plot Area" value={`${plotArea.toLocaleString()} sq.ft`} />
-          <StatRow label="Built-up Area" value={`${builtUp.toLocaleString()} sq.ft`} highlight />
+          {byFloor.map((a, i) => (
+            <StatRow key={i} label={`${floorLabels[i] || `Floor ${i + 1}`} Floor`} value={`${a.toLocaleString()} sq.ft`} />
+          ))}
+          <StatRow label="Total Built-up" value={`${builtUp.toLocaleString()} sq.ft (FAR: ${far})`} highlight />
           <StatRow label="Open Area" value={`${openArea.toLocaleString()} sq.ft`} />
           <StatRow label="Space Utilization" value={`${utilization}%`} />
           <StatRow label="Rooms" value={`${roomCount}`} />
@@ -863,7 +889,8 @@ function KnowledgePanel() {
     setLoading(true);
     setAnswer(null);
     try {
-      const res = await fetch('/api/ai/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: query }) });
+      const { aiHeaders } = await import('@/lib/ai/client');
+      const res = await fetch('/api/ai/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json', ...aiHeaders() }, body: JSON.stringify({ question: query }) });
       const data = await res.json();
       setAnswer(data.answer);
       setSources(data.sources || []);

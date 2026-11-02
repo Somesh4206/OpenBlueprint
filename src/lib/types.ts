@@ -19,6 +19,32 @@ export type RoomType =
 
 export type RoomShape = 'rect' | 'l-shape' | 't-shape';
 
+// fixed rooms keep their standard size; flex rooms share leftover band area
+export type Sizing = 'fixed' | 'flex';
+
+/** One staircase per building, reserved at the same XY on every floor. */
+export interface StairCore {
+  x: number;
+  y: number;
+  width: number;
+  length: number;
+  kind: 'dog-leg' | 'straight';
+}
+
+/** A design variant: knobs the engine turns into real geometry. */
+export interface LayoutChoice {
+  mirror: boolean;
+  stairSlot: 'left' | 'center' | 'right';
+  kitchenCorner: 'rear-left' | 'rear-right';
+  bandOrder: 0 | 1;
+}
+
+/** Why the search could not produce (more) designs. */
+export interface BlockedReason {
+  rule: string;
+  message: string;
+}
+
 export interface RoomRect {
   id: string;
   type: RoomType;
@@ -108,6 +134,10 @@ export interface WindowMarker {
   wall: 'top' | 'right' | 'bottom' | 'left';
   pos: number; // 0..1 along the wall
   width: number; // in units
+  // true when the wall sits on the plot/buildable edge (real daylight).
+  // Recessed walls with no neighbor get windows too, but those do not
+  // satisfy the external-window invariant.
+  external?: boolean;
 }
 
 export interface PlotConfig {
@@ -155,15 +185,19 @@ export type DesignStyle =
   | 'contemporary'
   | 'luxury';
 
+// Only preferences with real planning teeth. Removed: parking-near-entrance
+// (parking is always carved at the road), internal-staircase (stairs are
+// always inside now), improved-circulation (too vague to steer anything).
 export type PreferenceKey =
   | 'kitchen-near-dining'
   | 'master-attached-bath'
-  | 'parking-near-entrance'
-  | 'internal-staircase'
   | 'balcony-bedroom'
   | 'max-natural-light'
-  | 'improved-circulation'
-  | 'open-plan';
+  | 'open-plan'
+  // legacy (ignored if present in old saved configs)
+  | 'parking-near-entrance'
+  | 'internal-staircase'
+  | 'improved-circulation';
 
 export interface VastuPrefs {
   entrance: 'north' | 'east' | 'south' | 'west' | null;
@@ -177,7 +211,15 @@ export interface LayoutData {
   floors: number;
   rooms: RoomRect[];
   furniture: FurnitureItem[];
-  strategy: LayoutStrategy;
+  /** legacy: saved projects from before layout choices */
+  strategy?: LayoutStrategy;
+  stair?: StairCore;
+  choice?: LayoutChoice;
+  choiceLabel?: string;
+  /** AI reasoning trace (present when generated via the AI planner). */
+  reasoning?: string;
+  assumptions?: string[];
+  aiPlanned?: boolean;
 }
 
 export type LayoutStrategy =
@@ -200,12 +242,18 @@ export interface LayoutScore {
 export interface ScoredLayout {
   id: string;
   name: string;
-  strategy: LayoutStrategy;
+  /** legacy: saved projects from before layout choices */
+  strategy?: LayoutStrategy;
+  choice?: LayoutChoice;
   tagline: string;
   layout: LayoutData;
   score: LayoutScore;
   builtUpArea: number;
   roomCount: number;
+  /** AI reasoning trace (present when generated via the AI planner). */
+  reasoning?: string;
+  assumptions?: string[];
+  aiPlanned?: boolean;
 }
 
 export interface ValidationResult {

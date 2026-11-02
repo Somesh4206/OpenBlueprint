@@ -50,7 +50,11 @@ export function FurnitureMesh3D(props: FurnitureMesh3DProps): React.JSX.Element 
     [item.type, w, l, color],
   );
 
-  const rotY = ((item.rotation || 0) * Math.PI) / 180;
+  // In 2D SVG, rotation is clockwise around Y (screen down) and headboards/backrests
+  // face -Y (top). In 3D, models were built with backrest at +Z, and Three.js
+  // positive rotation around +Y is counter-clockwise when viewed from above.
+  // Converting (-item.rotation + 180) aligns 3D models perfectly with 2D orientation.
+  const rotY = (((-(item.rotation || 0) + 180) % 360) * Math.PI) / 180;
 
   return (
     <group position={[worldX, 0, worldZ]} rotation={[0, rotY, 0]}>

@@ -108,10 +108,12 @@ export function VastuReport({ config }: { config: { rooms: { type: string; name:
   const getQuadrant = (room: { x: number; y: number; width: number; length: number }) => {
     const cx = (room.x + room.width / 2) / config.plot.width;
     const cy = (room.y + room.length / 2) / config.plot.length;
-    if (cx < 0.5 && cy < 0.5) return 'NE';
-    if (cx >= 0.5 && cy < 0.5) return 'SE';
-    if (cx < 0.5 && cy >= 0.5) return 'NW';
-    return 'SW';
+    // North is top (cy < 0.5), South is bottom (cy >= 0.5)
+    // West is left (cx < 0.5), East is right (cx >= 0.5)
+    if (cx < 0.5 && cy < 0.5) return 'NW';
+    if (cx >= 0.5 && cy < 0.5) return 'NE';
+    if (cx < 0.5 && cy >= 0.5) return 'SW';
+    return 'SE';
   };
 
   return (

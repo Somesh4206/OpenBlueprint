@@ -1,4 +1,3 @@
-import ZAI from 'z-ai-web-dev-sdk';
 import {
   AiAction,
   AiAssistantResponse,
@@ -10,6 +9,7 @@ import { ROOM_CATALOG } from '../room-catalog';
 import { applyActions } from './apply-actions';
 import { generateInsights } from './apply-actions';
 import { INDIAN_ARCHITECTURE_CONTEXT } from '../indian-architecture';
+import { AIConfig, chatJSON, isAIConfigured } from './provider';
 
 const ARCHITECTURE_RULES = `NON-NEGOTIABLE ARCHITECTURAL RULES (the layout engine enforces these):
 
@@ -73,9 +73,9 @@ export async function interpretDesignRequest(
   message: string,
   layout: LayoutData,
   config: ProjectConfig,
+  aiCfg?: AIConfig,
+  floor = 0,
 ): Promise<AiAssistantResponse> {
-  const zai = await ZAI.create();
-
   const layoutSummary = layout.rooms
     .map(
       (r) =>
@@ -91,17 +91,17 @@ User request: "${message}"
 
 Return the structured JSON actions now.`;
 
-  try {
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'assistant', content: SYSTEM_PROMPT },
-        { role: 'user', content: userContent },
-      ],
-      thinking: { type: 'disabled' },
-    });
+  // Without an AI key, use the built-in rule engine (assistant edits are
+  // local transforms, so a fallback is safe here — unlike generation).
+  if (!aiCfg || !isAIConfigured(aiCfg)) {
+    return fallbackInterpret(message, layout, config);
+  }
 
-    const raw = completion.choices[0]?.message?.content || '';
-    const parsed = parseJsonLoose(raw);
+  try {
+    const parsed = await chatJSON<Record<string, unknown>>(aiCfg, SYSTEM_PROMPT, userContent, {
+      temperature: 0.2,
+      maxTokens: 800,
+    });
     const rawActions = Array.isArray(parsed.actions) ? parsed.actions : [];
     const actions: AiAction[] = rawActions.slice(0, 4).map((a: Record<string, unknown>) => ({
       type: (a.type as AiAction['type']) || 'note',
@@ -115,7 +115,7 @@ Return the structured JSON actions now.`;
       newName: a.newName as string | undefined,
     }));
 
-    const appliedLayout = applyActions(layout, config, actions);
+    const appliedLayout = applyActions(layout, config, actions, floor);
 
     return {
       understood: String(parsed.understood || 'I understand your request.'),
@@ -124,28 +124,11 @@ Return the structured JSON actions now.`;
       appliedLayout,
     };
   } catch {
-    return fallbackInterpret(message, layout, config);
+    return fallbackInterpret(message, layout, config, floor);
   }
 }
 
-function parseJsonLoose(raw: string): Record<string, unknown> {
-  let s = raw.trim();
-  if (s.startsWith('```')) {
-    s = s.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  }
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start >= 0 && end > start) {
-    s = s.slice(start, end + 1);
-  }
-  try {
-    return JSON.parse(s);
-  } catch {
-    return {};
-  }
-}
-
-function fallbackInterpret(message: string, layout: LayoutData, config: ProjectConfig): AiAssistantResponse {
+function fallbackInterpret(message: string, layout: LayoutData, config: ProjectConfig, floor = 0): AiAssistantResponse {
   const m = message.toLowerCase();
   const actions: AiAction[] = [];
 
@@ -194,7 +177,7 @@ function fallbackInterpret(message: string, layout: LayoutData, config: ProjectC
     }
   }
 
-  const appliedLayout = applyActions(layout, config, actions);
+  const appliedLayout = applyActions(layout, config, actions, floor);
   return {
     understood: 'I interpreted your request with the built-in rule engine.',
     actions,

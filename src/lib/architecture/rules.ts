@@ -133,17 +133,92 @@ export interface ProhibitionRule {
 }
 
 export interface ProhibitionContext {
-  rooms: { id: string; type: RoomType; name: string; x: number; y: number; width: number; length: number; floor: number; doors: { wall: string }[] }[];
+  rooms: { id: string; type: RoomType; name: string; x: number; y: number; width: number; length: number; floor: number; doors: { wall: string; pos?: number; width?: number }[] }[];
   plot: { width: number; length: number; roadSide: string };
   entryRoomId?: string;
 }
 
-// Adjacency helper: two rooms are adjacent if they share a wall segment
+// Which wall of `a` is shared with `b` (null when not adjacent).
+type WallId = 'top' | 'right' | 'bottom' | 'left';
+export function sharedWallId(
+  a: { x: number; y: number; width: number; length: number; floor?: number },
+  b: { x: number; y: number; width: number; length: number; floor?: number },
+  tol = 0.6,
+): WallId | null {
+  if (a.floor !== undefined && b.floor !== undefined && a.floor !== b.floor) return null;
+  const yOverlap = a.y < b.y + b.length - tol && a.y + a.length > b.y + tol;
+  const xOverlap = a.x < b.x + b.width - tol && a.x + a.width > b.x + tol;
+  if ((Math.abs(a.x + a.width - b.x) < tol || Math.abs(b.x + b.width - a.x) < tol) && yOverlap) {
+    return Math.abs(a.x + a.width - b.x) < tol ? 'right' : 'left';
+  }
+  if ((Math.abs(a.y + a.length - b.y) < tol || Math.abs(b.y + b.length - a.y) < tol) && xOverlap) {
+    return Math.abs(a.y + a.length - b.y) < tol ? 'bottom' : 'top';
+  }
+  return null;
+}
+
+// Shared wall segment between rooms, with the overlap range normalized
+// 0..1 along `a`'s wall. A door opens into the neighbor only when its own
+// span intersects that range — wall-granular checks false-positive when one
+// wall is shared with two rooms (e.g. bath door over the foyer segment of a
+// wall also shared with living).
+export interface WallOverlap {
+  wall: WallId;
+  lo: number;
+  hi: number;
+}
+
+export function sharedWallOverlap(
+  a: { x: number; y: number; width: number; length: number; floor?: number },
+  b: { x: number; y: number; width: number; length: number; floor?: number },
+  tol = 0.6,
+): WallOverlap | null {
+  if (a.floor !== undefined && b.floor !== undefined && a.floor !== b.floor) return null;
+  if (Math.abs(a.x + a.width - b.x) < tol || Math.abs(b.x + b.width - a.x) < tol) {
+    const lo = Math.max(a.y, b.y);
+    const hi = Math.min(a.y + a.length, b.y + b.length);
+    if (hi - lo > tol) {
+      const wall: WallId = Math.abs(a.x + a.width - b.x) < tol ? 'right' : 'left';
+      return { wall, lo: (lo - a.y) / a.length, hi: (hi - a.y) / a.length };
+    }
+  }
+  if (Math.abs(a.y + a.length - b.y) < tol || Math.abs(b.y + b.length - a.y) < tol) {
+    const lo = Math.max(a.x, b.x);
+    const hi = Math.min(a.x + a.width, b.x + b.width);
+    if (hi - lo > tol) {
+      const wall: WallId = Math.abs(a.y + a.length - b.y) < tol ? 'bottom' : 'top';
+      return { wall, lo: (lo - a.x) / a.width, hi: (hi - a.x) / a.width };
+    }
+  }
+  return null;
+}
+
+/** True when `room` has a door whose span intersects `other`'s wall overlap.
+ * Doors without position data fall back to wall-granular matching. */
+export function doorOpensIntoSegment(
+  room: { x: number; y: number; width: number; length: number; floor?: number; doors: { wall: string; pos?: number; width?: number }[] },
+  other: { x: number; y: number; width: number; length: number; floor?: number },
+): boolean {
+  const shared = sharedWallOverlap(room, other);
+  if (!shared) return false;
+  const wallLen = shared.wall === 'top' || shared.wall === 'bottom' ? room.width : room.length;
+  return room.doors.some((d) => {
+    if (d.wall !== shared.wall) return false;
+    if (d.pos === undefined || d.width === undefined) return true;
+    const half = d.width / 2 / Math.max(0.5, wallLen);
+    return d.pos + half > shared.lo && d.pos - half < shared.hi;
+  });
+}
+
+// Adjacency helper: two rooms are adjacent if they share a wall segment.
+// Floor-aware: rooms on different floors are NEVER adjacent (prevents
+// false violations like "upstairs bath opening off downstairs living").
 export function areAdjacent(
-  a: { x: number; y: number; width: number; length: number },
-  b: { x: number; y: number; width: number; length: number },
+  a: { x: number; y: number; width: number; length: number; floor?: number },
+  b: { x: number; y: number; width: number; length: number; floor?: number },
   tol = 0.6,
 ): boolean {
+  if (a.floor !== undefined && b.floor !== undefined && a.floor !== b.floor) return false;
   // share a vertical wall (left/right)
   const vShare =
     (Math.abs(a.x + a.width - b.x) < tol || Math.abs(b.x + b.width - a.x) < tol) &&
@@ -192,13 +267,17 @@ export const PROHIBITIONS: ProhibitionRule[] = [
     id: 'bathroom-off-living',
     description: 'Bathroom opening directly off living room.',
     check: (ctx) => {
+      // Door-aware AND segment-aware: sharing a wall is fine (plumbing
+      // walls are normal); the violation is a door whose span intersects the
+      // shared segment (same floor only).
       const baths = ctx.rooms.filter((r) => r.type === 'bathroom');
-      const living = ctx.rooms.find((r) => r.type === 'living');
-      const dining = ctx.rooms.find((r) => r.type === 'dining');
-      if (!living && !dining) return false;
+      const publicRooms = ctx.rooms.filter((r) => r.type === 'living' || r.type === 'dining');
+      if (publicRooms.length === 0) return false;
       for (const b of baths) {
-        if (living && areAdjacent(b, living)) return true;
-        if (dining && areAdjacent(b, dining)) return true;
+        for (const p of publicRooms) {
+          if (b.floor !== p.floor) continue;
+          if (doorOpensIntoSegment(b, p)) return true;
+        }
       }
       return false;
     },

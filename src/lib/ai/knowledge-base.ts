@@ -1,5 +1,5 @@
-import ZAI from 'z-ai-web-dev-sdk';
 import { KnowledgeAnswer } from '../types';
+import { AIConfig, chatText, isAIConfigured } from './provider';
 
 // Curated architectural / construction knowledge base
 interface KBEntry {
@@ -119,7 +119,7 @@ export function retrieveRelevant(query: string, limit = 3): KBEntry[] {
   return scored.filter((x) => x.s > 0).slice(0, limit).map((x) => x.e);
 }
 
-export async function answerKnowledgeQuestion(question: string): Promise<KnowledgeAnswer> {
+export async function answerKnowledgeQuestion(question: string, aiCfg?: AIConfig): Promise<KnowledgeAnswer> {
   const relevant = retrieveRelevant(question, 3);
   const context = relevant
     .map((e) => `### ${e.topic}\n${e.content}\nSource: ${e.source}`)
@@ -136,16 +136,21 @@ ${context || '(no directly relevant entries — answer from general architectura
 
 User question: ${question}`;
 
+  // Without an AI key, answer from the curated base directly.
+  if (!aiCfg || !isAIConfigured(aiCfg)) {
+    if (relevant.length > 0) {
+      return {
+        question,
+        answer: relevant[0].content + '\n\nNote: OpenBlueprint plans are preliminary and not a substitute for professional advice or regulatory drawings.',
+        sources: relevant.map((e) => e.source),
+      };
+    }
+    return { question, answer: 'Add your AI key to enable synthesized answers. Try rephrasing your question meanwhile.', sources: [] };
+  }
+
   try {
-    const zai = await ZAI.create();
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'assistant', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-      thinking: { type: 'disabled' },
-    });
-    const answer = completion.choices[0]?.message?.content || 'I could not retrieve an answer right now.';
+    const answer = (await chatText(aiCfg, systemPrompt, userContent, { maxTokens: 600 }))
+      || 'I could not retrieve an answer right now.';
     return {
       question,
       answer,

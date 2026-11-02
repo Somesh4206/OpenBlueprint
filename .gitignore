@@ -52,6 +52,13 @@ prompt
 server.log
 # Skills directory
 /skills/
+# Agent session artifacts
+/upload/
+/tool-results/
+/test-results/
+/public/live-verify/
+.zscripts/dev.pid
+
 # Agent context
 /agent-ctx/
 /examples/

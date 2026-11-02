@@ -4,7 +4,7 @@
 // + coordinates.
 
 import { RoomRect, RoomRequirement, RoomType, PlotConfig, LayoutStrategy } from '../types';
-import { ROOM_CATALOG } from '../room-catalog';
+import { CAPPED_TYPES, ROOM_CATALOG } from '../room-catalog';
 import { Zone, zoneOf, ZONE_PLACEMENT, PRIVACY_ORDER, DESIRED_ADJACENCY, PROHIBITED_ADJACENCY, areAdjacent } from './rules';
 import { genId, round, Rect } from '../layout/engine';
 
@@ -19,6 +19,41 @@ export interface PlannerResult {
   zones: ZoneCluster[];
   adjacencyMap: Record<string, string[]>; // roomId → [adjacent roomIds]
 }
+
+// Front→rear band map per floor class (AI Context §5). Unmapped types fall
+// into the last band (rear/service) — deterministic, never silent.
+export const BAND_MAP: Record<string, RoomRequirement['type'][]> = {
+  'ground-entry': ['foyer', 'living'],
+  'ground-social': ['dining', 'bathroom'],
+  'ground-service': ['kitchen', 'utility', 'store'],
+  'ground-private': ['bedroom', 'pooja', 'office'],
+  'upper-front': ['balcony', 'foyer'],
+  'upper-rear': ['bedroom', 'bathroom', 'pooja', 'office'],
+};
+
+export function assignBands(reqs: RoomRequirement[], floor: number): { band: string; reqs: RoomRequirement[] }[] {
+  const order = floor === 0
+    ? ['ground-entry', 'ground-social', 'ground-service', 'ground-private']
+    : ['upper-front', 'upper-rear'];
+  const groups = order.map((band) => ({ band, reqs: [] as RoomRequirement[] }));
+  const at = (band: string) => groups.find((g) => g.band === band)!;
+  for (const r of reqs) {
+    // Parking never drops out: ground service band, or the upper-front
+    // lobby band when a custom split puts it upstairs (the validator then
+    // judges the prohibited parking↔bedroom adjacency explicitly).
+    if (r.type === 'parking') {
+      at(floor === 0 ? 'ground-service' : 'upper-front').reqs.push(r);
+      continue;
+    }
+    const idx = order.findIndex((b) => (BAND_MAP[b] || []).includes(r.type));
+    groups[idx < 0 ? groups.length - 1 : idx].reqs.push(r);
+  }
+  return groups.filter((g) => g.reqs.length > 0);
+}
+
+// Minimum workable band-strip depth. A thinner strip cannot hold any room
+// and manufactures slivers — the engine merges such bands into a neighbor.
+export const MIN_BAND_DEPTH = 6.5;
 
 // Allocate zone regions within the buildable area.
 // public → front (near road), private → rear, service → side, circulation → center.
@@ -72,8 +107,23 @@ export function allocateZones(
       w: buildable.w - serviceDepth,
       h: buildable.h,
     };
-    // Split rest into public (front) and private (rear)
-    const splitH = rest.h * 0.5;
+    // Split rest into public (front) and private (rear), area-proportional
+    // so a tiny zone doesn't swallow half the floor.
+    const zoneArea = (z: Zone) =>
+      nonEmpty.find((c) => c.zone === z)?.rooms.reduce((s, r) => {
+        const cat = ROOM_CATALOG[r.type];
+        return s + (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
+      }, 0) || 0;
+    const pA = zoneArea('public');
+    const rA = zoneArea('private');
+    const rRatio = pA + rA > 0 ? rA / (pA + rA) : 0.5;
+    const splitH = Math.round(rest.h * (1 - Math.min(0.7, Math.max(0.2, rRatio))) * 2) / 2;
+    // Guard: if either strip would be a ribbon (< 6.5ft deep — no room can
+    // live in it), don't zone-split at all. One ordered pack beats two
+    // ribbons; the privacy sort inside still keeps public toward entry.
+    if (Math.min(splitH, rest.h - splitH) < 6.5) {
+      return [{ zone: 'public', rooms: [...nonEmpty.flatMap((c) => c.rooms)], rect: { ...buildable } }];
+    }
     const publicRect: Rect = roadIsSouthOrEast
       ? { x: rest.x, y: rest.y + rest.h - splitH, w: rest.w, h: splitH }   // front = bottom (south)
       : { x: rest.x, y: rest.y, w: rest.w, h: splitH };                     // front = top (north)
@@ -88,8 +138,22 @@ export function allocateZones(
       else c.rect = { x: rest.x + rest.w * 0.4, y: rest.y + rest.h * 0.4, w: rest.w * 0.2, h: rest.h * 0.2 };
     }
   } else if (hasPublic && hasPrivate) {
-    // Two-zone split: public front, private rear
-    const splitH = buildable.h * 0.5;
+    // Two-zone split: public front, private rear — sized by each zone's
+    // total preferred area (a lone powder room must NOT get half the floor).
+    const areaOf = (z: Zone) =>
+      nonEmpty.find((c) => c.zone === z)?.rooms.reduce((s, r) => {
+        const cat = ROOM_CATALOG[r.type];
+        return s + (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
+      }, 0) || 0;
+    const pubArea = areaOf('public');
+    const privArea = areaOf('private');
+    const privRatio = pubArea + privArea > 0 ? privArea / (pubArea + privArea) : 0.5;
+    const clamped = Math.min(0.7, Math.max(0.2, privRatio));
+    const splitH = Math.round(buildable.h * (1 - clamped) * 2) / 2;
+    // Same ribbon guard as the 3-zone branch: no strip under 6.5ft deep.
+    if (Math.min(splitH, buildable.h - splitH) < 6.5) {
+      return [{ zone: 'public', rooms: [...nonEmpty.flatMap((c) => c.rooms)], rect: { ...buildable } }];
+    }
     const publicRect: Rect = roadIsSouthOrEast
       ? { x: buildable.x, y: buildable.y + buildable.h - splitH, w: buildable.w, h: splitH }
       : { x: buildable.x, y: buildable.y, w: buildable.w, h: splitH };
@@ -127,21 +191,31 @@ export function allocateZones(
   return nonEmpty;
 }
 
-// Place rooms within a zone cluster using BSP, sorted by privacy gradient.
+// Place rooms within a zone cluster using BSP.
+// Order: AI anchor rank first (when provided), then LARGEST-first
+// (classic decreasing-fit: big rooms claim clean slabs, small rooms fill
+// the cracks — privacy-gradient ordering instead packed kitchens into
+// slivers while bedrooms hogged space they didn't need).
 export function placeZoneRooms(
   cluster: ZoneCluster,
   floor: number,
   plot: PlotConfig,
-  strategy: LayoutStrategy,
+  anchorRank?: (r: RoomRequirement) => number,
 ): RoomRect[] {
   const rooms = cluster.rooms;
   if (rooms.length === 0) return [];
 
-  // Sort by privacy order (most public first) so they cluster from the entry side
+  const area = (r: RoomRequirement) => {
+    const cat = ROOM_CATALOG[r.type];
+    return (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
+  };
   const sorted = [...rooms].sort((a, b) => {
-    const pa = PRIVACY_ORDER[a.type] ?? 5;
-    const pb = PRIVACY_ORDER[b.type] ?? 5;
-    return pa - pb;
+    if (anchorRank) {
+      const ra = anchorRank(a);
+      const rb = anchorRank(b);
+      if (ra !== rb) return ra - rb;
+    }
+    return area(b) - area(a);
   });
 
   // BSP pack within the zone rect
@@ -168,69 +242,295 @@ export function placeZoneRooms(
 
 interface Placed { rect: Rect; req: RoomRequirement; }
 
-function bspPackZone(rect: Rect, rooms: RoomRequirement[]): Placed[] {
+function prefArea(r: RoomRequirement): number {
+  const cat = ROOM_CATALOG[r.type];
+  return (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
+}
+
+function minArea(r: RoomRequirement): number {
+  const cat = ROOM_CATALOG[r.type];
+  return (r.minWidth || cat.minWidth) * (r.minLength || cat.minLength);
+}
+
+/**
+ * Narrowest a room may ever be, in EITHER orientation. A rect can only hold
+ * this room if its short side is at least this, so it is the hard floor for
+ * every BSP split. Without it, area-only splitting produces a 4.5ft kitchen.
+ */
+function minDim(r: RoomRequirement): number {
+  const cat = ROOM_CATALOG[r.type];
+  return Math.min(r.minWidth || cat.minWidth, r.minLength || cat.minLength);
+}
+
+/** Narrowest side that can hold every room in `side` (they tile along it). */
+function needNarrow(side: RoomRequirement[]): number {
+  return side.reduce((m, r) => Math.max(m, minDim(r)), 0);
+}
+
+/**
+ * Area-proportioned BSP that fills `rect` with ZERO void and respects
+ * minimum sizes: when the room list doesn't fit at preferred sizes, every
+ * target shrinks toward its minimum (never below) instead of crushing a
+ * few rooms into slivers. Split sides are clamped so each side can hold
+ * its rooms' total minimum area whenever physically possible.
+ */
+export function packRect(rect: Rect, rooms: RoomRequirement[]): Placed[] {
   if (rooms.length === 0) return [];
   if (rooms.length === 1) return [{ rect, req: rooms[0] }];
 
-  // Split based on area ratios
-  const targetAreas = rooms.map((r) => {
-    const cat = ROOM_CATALOG[r.type];
-    return (r.preferredWidth || cat.preferredWidth) * (r.preferredLength || cat.preferredLength);
-  });
-  const total = targetAreas.reduce((a, b) => a + b, 0);
-
-  let splitIdx = 1;
-  let bestDiff = Infinity;
-  for (let i = 1; i < rooms.length; i++) {
-    const acc = targetAreas.slice(0, i).reduce((a, b) => a + b, 0);
-    const diff = Math.abs(acc / total - 0.5);
-    if (diff < bestDiff) { bestDiff = diff; splitIdx = i; }
+  // BOND: ensure kitchen and dining are adjacent in the input array so BSP
+  // never splits them to opposite sides. Move dining right after kitchen
+  // (or vice versa) before the area-balanced split below.
+  const sorted = [...rooms];
+  const ki = sorted.findIndex((r) => r.type === 'kitchen');
+  const di = sorted.findIndex((r) => r.type === 'dining');
+  if (ki >= 0 && di >= 0 && Math.abs(ki - di) > 1) {
+    const [dining] = sorted.splice(di, 1);
+    const newKi = sorted.findIndex((r) => r.type === 'kitchen');
+    sorted.splice(newKi + 1, 0, dining); // insert dining right after kitchen
   }
-  const leftRooms = rooms.slice(0, splitIdx);
-  const rightRooms = rooms.slice(splitIdx);
-  const leftArea = targetAreas.slice(0, splitIdx).reduce((a, b) => a + b, 0);
-  const ratio = total > 0 ? leftArea / total : 0.5;
 
-  const splitVertical = rect.w >= rect.h;
+  const rectArea = Math.max(1, rect.w * rect.h);
+  const prefs = sorted.map(prefArea);
+  const mins = sorted.map(minArea);
+  const totalMin = mins.reduce((a, b) => a + b, 0);
+  const isFlex = sorted.map((r) => ROOM_CATALOG[r.type].sizing === 'flex');
+  // Fixed rooms (bath, store, pooja, utility, parking, staircase, foyer) take
+  // their standard size, never more than their cap. Flex rooms (living,
+  // bedroom, dining, kitchen) then share whatever the rect has left, in
+  // proportion to their preferred areas, so the rect fills EXACTLY with no
+  // gap and the leftover never inflates a bathroom or a stair lobby.
+  const targets = sorted.map((_, i) =>
+    isFlex[i]
+      ? mins[i]
+      : Math.max(mins[i], Math.min(prefs[i], ROOM_CATALOG[sorted[i].type].maxArea)),
+  );
+  const fixedTotal = targets.reduce((s, t, i) => (isFlex[i] ? s : s + t), 0);
+  const flexPref = prefs.reduce((s, p, i) => (isFlex[i] ? s + p : s), 0);
+  const flexRoom = rectArea - fixedTotal;
+  if (flexPref > 0 && flexRoom > 0) {
+    // Flex rooms may pass their catalog cap here: the validator reports that
+    // as a warning, and a gap-free floor matters more than a soft cap.
+    for (let i = 0; i < sorted.length; i++) {
+      if (isFlex[i]) targets[i] = Math.max(mins[i], (flexRoom * prefs[i]) / flexPref);
+    }
+  } else if (flexPref === 0 && fixedTotal > 0) {
+    // All-fixed rect (two baths and a store): scale together to fill it
+    // rather than leaving a void.
+    const scale = rectArea / fixedTotal;
+    for (let i = 0; i < sorted.length; i++) targets[i] = Math.max(mins[i], targets[i] * scale);
+  }
+  // Over-subscribed rect: every target shrinks toward its minimum together
+  // (never below), so the squeeze is shared instead of falling on one room.
+  const sumTargets = targets.reduce((a, b) => a + b, 0);
+  if (sumTargets > rectArea && sumTargets > totalMin) {
+    const t = Math.max(0, (rectArea - totalMin) / (sumTargets - totalMin));
+    for (let i = 0; i < sorted.length; i++) targets[i] = mins[i] + (targets[i] - mins[i]) * t;
+  }
+  const totalTarget = targets.reduce((a, b) => a + b, 0);
+
+  // Aspect-aware split selection: evaluate every (index, orientation) pair.
+  // Cost = area imbalance + thin-child penalty (a child strip under 6.5ft
+  // deep strands its rooms as slivers) + kitchen-dining bond penalty.
+  // Deterministic: fixed evaluation order, strict improvement only.
+  const MIN_SIDE = 4; // small baths/pooja/store legally fit 4ft
+  const bondPenalty = (i: number): number => {
+    const leftTypes = sorted.slice(0, i).map((r) => r.type);
+    const rightTypes = sorted.slice(i).map((r) => r.type);
+    const kitchenDiningSplit =
+      (leftTypes.includes('kitchen') && rightTypes.includes('dining')) ||
+      (leftTypes.includes('dining') && rightTypes.includes('kitchen'));
+    return kitchenDiningSplit ? 0.5 : 0; // heavy penalty
+  };
+  // A side holding exactly one room is scored exactly: that room's area
+  // overflow and aspect violation in the child rect (capped types only —
+  // uncapped rooms never fail). Multiroom sides keep the thin-strip
+  // heuristic, applied only when they hold capped rooms.
+  const sideCost = (w: number, h: number, side: RoomRequirement[]): number => {
+    const thin = Math.min(w, h);
+    // A child narrower than its narrowest room cannot hold it at all: a 4.5ft
+    // kitchen or an 8ft parking bay is unusable no matter how its area reads.
+    // Weighted above every other term so the search avoids it outright.
+    const need = needNarrow(side);
+    let cost = thin < need - 0.05 ? 25 + (need - thin) * 5 : 0;
+    if (side.length === 1) {
+      const cat = ROOM_CATALOG[side[0].type];
+      const area = Math.max(0.5, w) * Math.max(0.5, h);
+      // Every FIXED room is charged for passing its cap, whether or not it is
+      // in CAPPED_TYPES (which covers only bedroom/bathroom/kitchen/living).
+      // A foyer is fixed at 72 sq.ft but absent from that set, so without
+      // this an "Upper Lobby" alone in a child rect quietly took 209 sq.ft.
+      // Flex rooms are exempt: absorbing the leftover is their job.
+      if (cat.sizing === 'fixed' && area > cat.maxArea + 0.5) cost += 10 + (area - cat.maxArea) / 10;
+      if (!CAPPED_TYPES.has(side[0].type)) return cost;
+      const aspect = Math.max(w, h) / Math.max(0.5, Math.min(w, h));
+      if (aspect > cat.maxAspect + 0.05) cost += 10 + (aspect - cat.maxAspect) * 5;
+      return cost;
+    }
+    if (!side.some((r) => CAPPED_TYPES.has(r.type))) return cost;
+    // Thin strips doom their rooms: 24x1-style slivers come from here.
+    if (thin < MIN_SIDE) return cost + 10 + (MIN_SIDE - thin);
+    if (thin < MIN_BAND_DEPTH) return cost + 1 + (MIN_BAND_DEPTH - thin) / MIN_BAND_DEPTH;
+    return cost;
+  };
+  let splitIdx = 1;
+  let splitVertical = rect.w >= rect.h;
+  let bestCost = Infinity;
+  let bestMinDim = -Infinity;
+  for (let i = 1; i < sorted.length; i++) {
+    const acc = targets.slice(0, i).reduce((a, b) => a + b, 0);
+    const balance = totalTarget > 0 ? Math.abs(acc / totalTarget - 0.5) : 0.5;
+    for (const vertical of [true, false]) {
+      const span = vertical ? rect.w : rect.h;
+      // Both children keep at least MIN_SIDE, and — when the span allows it —
+      // enough width for the narrowest room each one holds.
+      let d = span * (totalTarget > 0 ? acc / totalTarget : 0.5);
+      d = Math.max(MIN_SIDE, Math.min(span - MIN_SIDE, d));
+      const lo = needNarrow(sorted.slice(0, i));
+      const hi = span - needNarrow(sorted.slice(i));
+      if (lo <= hi) d = Math.min(Math.max(d, lo), hi);
+      d = Math.round(d * 2) / 2;
+      const c1 = vertical ? { w: d, h: rect.h } : { w: rect.w, h: d };
+      const c2 = vertical ? { w: span - d, h: rect.h } : { w: rect.w, h: span - d };
+      const cost =
+        balance +
+        sideCost(c1.w, c1.h, sorted.slice(0, i)) +
+        sideCost(c2.w, c2.h, sorted.slice(i)) +
+        bondPenalty(i);
+      // Tie-break: squarer children tile better downstream (a 15x7 + 15x7
+      // split keeps every option open; 10.4x14 + 3.6x14 dooms a side).
+      const minDim = Math.min(
+        Math.min(c1.w, c1.h),
+        Math.min(c2.w, c2.h),
+      );
+      if (cost < bestCost - 1e-9 || (Math.abs(cost - bestCost) <= 1e-9 && minDim > bestMinDim)) {
+        bestCost = cost;
+        bestMinDim = minDim;
+        splitIdx = i;
+        splitVertical = vertical;
+      }
+    }
+  }
+  const leftRooms = sorted.slice(0, splitIdx);
+  const rightRooms = sorted.slice(splitIdx);
+  const leftTarget = targets.slice(0, splitIdx).reduce((a, b) => a + b, 0);
+  const leftMin = mins.slice(0, splitIdx).reduce((a, b) => a + b, 0);
+  const rightMin = mins.slice(splitIdx).reduce((a, b) => a + b, 0);
+  let ratio = totalTarget > 0 ? leftTarget / totalTarget : 0.5;
+  // Clamp: neither side may be smaller than its rooms' minimum footprint.
+  const minRatio = totalMin > 0 ? leftMin / Math.max(totalMin, rectArea) : 0.15;
+  const maxRatio = totalMin > 0 ? 1 - rightMin / Math.max(totalMin, rectArea) : 0.85;
+  ratio = Math.min(Math.max(ratio, Math.min(minRatio, 0.85)), Math.max(maxRatio, 0.15));
+  ratio = Math.min(0.85, Math.max(0.15, ratio));
+
+  // Same minimum-dimension clamp as the candidate scan, so the split that
+  // actually gets cut is the one that was scored.
+  const needLeft = needNarrow(leftRooms);
+  const needRight = needNarrow(rightRooms);
+  const clampSplit = (span: number, raw: number): number => {
+    let d = Math.max(MIN_SIDE, Math.min(span - MIN_SIDE, raw));
+    const hi = span - needRight;
+    if (needLeft <= hi) d = Math.min(Math.max(d, needLeft), hi);
+    return Math.round(d * 2) / 2;
+  };
   let leftRect: Rect, rightRect: Rect;
   if (splitVertical) {
-    let sw = rect.w * ratio;
-    sw = Math.max(6, Math.min(rect.w - 6, sw));
-    sw = Math.round(sw * 2) / 2;
+    const sw = clampSplit(rect.w, rect.w * ratio);
     leftRect = { x: rect.x, y: rect.y, w: sw, h: rect.h };
     rightRect = { x: rect.x + sw, y: rect.y, w: rect.w - sw, h: rect.h };
   } else {
-    let sh = rect.h * ratio;
-    sh = Math.max(6, Math.min(rect.h - 6, sh));
-    sh = Math.round(sh * 2) / 2;
+    const sh = clampSplit(rect.h, rect.h * ratio);
     leftRect = { x: rect.x, y: rect.y, w: rect.w, h: sh };
     rightRect = { x: rect.x, y: rect.y + sh, w: rect.w, h: rect.h - sh };
   }
 
-  return [...bspPackZone(leftRect, leftRooms), ...bspPackZone(rightRect, rightRooms)];
+  return [...packRect(leftRect, leftRooms), ...packRect(rightRect, rightRooms)];
+}
+
+/** Pack rooms into any rect and convert to RoomRects (no zone splitting). */
+export function packRooms(rect: Rect, reqs: RoomRequirement[], floor: number): RoomRect[] {
+  return packRect(rect, reqs).map((p) => {
+    const cat = ROOM_CATALOG[p.req.type];
+    return {
+      id: genId(),
+      type: p.req.type,
+      name: p.req.name || cat.defaultName,
+      x: round(p.rect.x),
+      y: round(p.rect.y),
+      width: round(p.rect.w),
+      length: round(p.rect.h),
+      floor,
+      doors: [],
+      windows: [],
+    };
+  });
+}
+
+function bspPackZone(rect: Rect, rooms: RoomRequirement[]): Placed[] {
+  return packRect(rect, rooms);
 }
 
 // Post-placement adjustment: try to swap rooms to satisfy desired adjacencies.
 // Only swaps rooms WITHIN THE SAME ZONE to preserve zone clustering.
+export function countCapViolations(rs: { type: RoomRect['type']; width: number; length: number }[]): number {
+  // Defects a swap would create. Used as a guard by both optimizeAdjacencies
+  // and repairGeometry, so anything it cannot see, those are free to inflict.
+  let n = 0;
+  for (const r of rs) {
+    const cat = ROOM_CATALOG[r.type];
+    if (!cat) continue;
+    const short = Math.min(r.width, r.length);
+    const long = Math.max(r.width, r.length);
+    const area = r.width * r.length;
+    const capped = CAPPED_TYPES.has(r.type);
+    // Unusable slot, counted for EVERY type: a room narrower than its own
+    // catalog minimum in either orientation cannot be built. Without this a
+    // bedroom (minWidth 9) landed in a 5ft slot and scored as an improvement,
+    // because losing an area violation outweighed gaining nothing countable.
+    if (short < Math.min(cat.minWidth, cat.minLength) - 0.5) n++;
+    if (long < Math.max(cat.minWidth, cat.minLength) - 0.5) n++;
+    // Area cap applies to capped types AND to every fixed room: foyer is
+    // fixed at 72 sq.ft but absent from CAPPED_TYPES, so an "Upper Lobby"
+    // swallowing 200 sq.ft used to cost nothing here.
+    if ((capped || cat.sizing === 'fixed') && area > cat.maxArea + 0.5) n++;
+    // Aspect stays a capped-type concern (circulation may be long and thin).
+    if (capped && long / Math.max(0.5, short) > cat.maxAspect + 0.05) n++;
+  }
+  return n;
+}
+
 export function optimizeAdjacencies(rooms: RoomRect[]): RoomRect[] {
+  const capViolations = countCapViolations;
   let improved = [...rooms];
   let bestScore = scoreAdjacencies(improved);
+  let bestCaps = capViolations(improved);
   for (let iter = 0; iter < 15; iter++) {
     let changed = false;
     for (let i = 0; i < improved.length; i++) {
       for (let j = i + 1; j < improved.length; j++) {
         // only swap rooms in the same zone
         if (zoneOf(improved[i].type) !== zoneOf(improved[j].type)) continue;
+        // never swap a room into a slot smaller than its catalog minimum —
+        // swaps that manufacture slivers (e.g. living into a 3.5ft slot) hurt
+        // far more than any adjacency point is worth.
+        const catA = ROOM_CATALOG[improved[i].type];
+        const catB = ROOM_CATALOG[improved[j].type];
+        if (
+          trialSizeOk(improved[j], catA) === false ||
+          trialSizeOk(improved[i], catB) === false
+        ) continue;
         // swap positions
         const trial = [...improved];
         const a = { ...trial[i], x: trial[j].x, y: trial[j].y, width: trial[j].width, length: trial[j].length };
         const b = { ...trial[j], x: improved[i].x, y: improved[i].y, width: improved[i].width, length: improved[i].length };
         trial[i] = a;
         trial[j] = b;
+        if (capViolations(trial) > bestCaps) continue;
         const trialScore = scoreAdjacencies(trial);
         if (trialScore > bestScore) {
           improved = trial;
           bestScore = trialScore;
+          bestCaps = capViolations(trial);
           changed = true;
         }
       }
@@ -238,6 +538,14 @@ export function optimizeAdjacencies(rooms: RoomRect[]): RoomRect[] {
     if (!changed) break;
   }
   return improved;
+}
+
+/** Would `room`'s slot satisfy `cat` minimum dimensions? */
+function trialSizeOk(
+  slot: { width: number; length: number },
+  cat: { minWidth: number; minLength: number },
+): boolean {
+  return slot.width >= cat.minWidth - 0.5 && slot.length >= cat.minLength - 0.5;
 }
 
 // Score how well a layout satisfies desired + prohibited adjacencies.

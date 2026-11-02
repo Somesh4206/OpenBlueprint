@@ -163,7 +163,7 @@ const defaultConfig: ProjectConfig = {
     },
   ],
   style: 'modern',
-  preferences: ['kitchen-near-dining', 'master-attached-bath', 'parking-near-entrance', 'max-natural-light'],
+  preferences: ['kitchen-near-dining', 'master-attached-bath', 'max-natural-light'],
   vastuEnabled: false,
   vastu: { entrance: 'east', kitchen: 'southeast', bedroom: 'southwest', pooja: 'northeast' },
 };
@@ -240,6 +240,7 @@ export const useApp = create<AppState>((set, get) => ({
       selectedFurnitureId: null,
       view2d: true,
       currentFloor: 0,
+      showAllFloors: false,
       style: get().wizardConfig.style,
     }),
   addFurniture: (type, x, y) => {

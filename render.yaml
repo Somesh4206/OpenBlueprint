@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: openblueprint
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: file:/var/data/prod.db
+    disk:
+      name: openblueprint-data
+      mountPath: /var/data
+      sizeGB: 1
